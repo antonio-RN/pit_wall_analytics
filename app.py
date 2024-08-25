@@ -63,8 +63,16 @@ colH1.write("""
          """)
 
 # Info next event
-next_event = ff1.get_events_remaining().iloc[0]
-time_to_next_event = next_event.at["Session5DateUtc"] - dt.datetime.now()
+select_event_schedule = ff1.get_event_schedule(dt.datetime.now(dt.timezone.utc).year, include_testing=False)
+select_event_schedule= select_event_schedule.assign(
+    Session1_UTC=lambda df: df.loc[:,"Session1DateUtc"].map(lambda ele: ele.tz_localize("utc")),
+    Session2_UTC=lambda df: df.loc[:,"Session2DateUtc"].map(lambda ele: ele.tz_localize("utc")),
+    Session3_UTC=lambda df: df.loc[:,"Session3DateUtc"].map(lambda ele: ele.tz_localize("utc")),
+    Session4_UTC=lambda df: df.loc[:,"Session4DateUtc"].map(lambda ele: ele.tz_localize("utc")),
+    Session5_UTC=lambda df: df.loc[:,"Session5DateUtc"].map(lambda ele: ele.tz_localize("utc")),
+)
+next_event = select_event_schedule.loc[select_event_schedule["Session5_UTC"] > dt.datetime.now(dt.timezone.utc),:].iloc[0]
+time_to_next_event = next_event.at["Session5_UTC"] - dt.datetime.now(dt.timezone.utc)
 
 colH3, colH4 = colH2.columns(2)
 colH3.metric(
@@ -85,29 +93,30 @@ colH4.metric(
 )
 
 ## Tab RESULTS
-# Info current year schedule (pre-selection)
-select_event_schedule = ff1.get_event_schedule(dt.datetime.now().year, include_testing=False)
-select_event_schedule = select_event_schedule[select_event_schedule["RoundNumber"].isin(range(1, next_event["RoundNumber"]-1+1))].sort_values("RoundNumber", ascending=False)
-
 # Input from user (year)
 colR1, colR2 = tab_Results.columns(2)
 colR3, colR4, colR5 = colR1.columns(3)
 st.session_state.sel_year = colR3.selectbox(
-    "Season", options=range(2018, dt.datetime.now().year+1)[::-1], index=0     #CAMBIAR LÍMITE 2018-actual a inicial-actual
+    "Season", options=range(2018, dt.datetime.now(dt.timezone.utc).year+1)[::-1], index=0
 )
 
 # Update info selected schedule, input from user (GP)
-if st.session_state.sel_year != dt.datetime.now().year:
+if st.session_state.sel_year != dt.datetime.now(dt.timezone.utc).year:
     select_event_schedule = ff1.get_event_schedule(st.session_state.sel_year, include_testing=False).sort_values("RoundNumber", ascending=False)
+rest_GPs = select_event_schedule.loc[select_event_schedule["Session5_UTC"] < dt.datetime.now(dt.timezone.utc),:]
 st.session_state.sel_GP = colR4.selectbox(
-    "Grand Prix", options=select_event_schedule.loc[:,"EventName"], index=0
+    "Grand Prix", options=rest_GPs.sort_values("RoundNumber", ascending=False).loc[:,"EventName"], index=0
 )
+select_session = load_data_session(st.session_state.sel_year, st.session_state.sel_GP, "Race", laps=True)
 
 # Update info selected schedule, input from user (GP session)
 list_available_sessions = select_event_schedule[select_event_schedule["EventName"] == st.session_state.sel_GP].loc[
     :,["Session1", "Session2", "Session3", "Session4", "Session5"]
 ].iloc[0].to_list()[::-1]
-session_options = ["Qualifying", "Race", "Sprint"]
+session_options = ["Qualifying", "Sprint", "Race"]
+if (len(select_session.results)<1) | (len(select_session.results.loc[:,"Position"].unique())<5) |  (len(select_session.laps)<1):
+    session_options.remove("Race")
+
 list_select_sessions = [session for session in list_available_sessions if session in session_options]
 st.session_state.sel_GP_session = colR5.selectbox(
         "Session", options=list_select_sessions, index=0
@@ -538,17 +547,20 @@ if driver_selected[0]:
             df_telemetry_laps = select_laps_1.pick_laps(laps_display_1.selection["rows"][0]+1).get_car_data().add_distance()
             df_telemetry_laps.loc[:,"LapN"] = 1
             df_telemetry_laps.loc[:,"Driver"] = select_session.results.loc[select_session.results["DriverNumber"]==st.session_state.sel_telem_1,"Abbreviation"].iloc[0]
+            df_telemetry_laps.loc[:,"Distance_r"] = df_telemetry_laps.loc[:,"Distance"]
             if laps_selected[1]:
                 st.session_state.sel_telem_2 = st.session_state.sel_driver_2
                 select_laps_2 = select_session.laps.pick_driver(st.session_state.sel_telem_2)
                 df_telemetry_laps_2 = select_laps_2.pick_laps(laps_display_2.selection["rows"][0]+1).get_car_data().add_distance()
                 df_telemetry_laps_2.loc[:,"LapN"] = 2
                 df_telemetry_laps_2.loc[:,"Driver"] = select_session.results.loc[select_session.results["DriverNumber"]==st.session_state.sel_telem_2,"Abbreviation"].iloc[0]
+                df_telemetry_laps_2.loc[:,"Distance_r"] = df_telemetry_laps_2.loc[:, "Distance"] / df_telemetry_laps_2.loc[df_telemetry_laps_2.index[-1], "Distance"] * df_telemetry_laps.loc[df_telemetry_laps.index[-1], "Distance"]
                 df_telemetry_laps = pd.concat([df_telemetry_laps, df_telemetry_laps_2])
             elif laps_selected[0]>1:
                     df_telemetry_laps_2 = select_laps_1.pick_laps(laps_display_1.selection["rows"][1]+1).get_car_data().add_distance()
                     df_telemetry_laps_2.loc[:,"LapN"] = 2
                     df_telemetry_laps_2.loc[:,"Driver"] = select_session.results.loc[select_session.results["DriverNumber"]==st.session_state.sel_telem_1,"Abbreviation"].iloc[0]
+                    df_telemetry_laps_2.loc[:,"Distance_r"] = df_telemetry_laps_2.loc[:, "Distance"] / df_telemetry_laps_2.loc[df_telemetry_laps_2.index[-1], "Distance"] * df_telemetry_laps.loc[df_telemetry_laps.index[-1], "Distance"]
                     df_telemetry_laps = pd.concat([df_telemetry_laps, df_telemetry_laps_2])
         else:
             if laps_selected[1]:
@@ -558,10 +570,12 @@ if driver_selected[0]:
                 df_telemetry_laps = select_laps_1.pick_laps(laps_display_2.selection["rows"][0]+1).get_car_data().add_distance()
                 df_telemetry_laps.loc[:,"LapN"] = 1
                 df_telemetry_laps.loc[:,"Driver"] = select_session.results.loc[select_session.results["DriverNumber"]==st.session_state.sel_telem_1,"Abbreviation"].iloc[0]
+                df_telemetry_laps.loc[:,"Distance_r"] = df_telemetry_laps.loc[:,"Distance"]
                 if laps_selected[1]>1:
                     df_telemetry_laps_2 = select_laps_1.pick_laps(laps_display_2.selection["rows"][1]+1).get_car_data().add_distance()
                     df_telemetry_laps_2.loc[:,"LapN"] = 2
                     df_telemetry_laps_2.loc[:,"Driver"] = select_session.results.loc[select_session.results["DriverNumber"]==st.session_state.sel_telem_1,"Abbreviation"].iloc[0]
+                    df_telemetry_laps_2.loc[:,"Distance_r"] = df_telemetry_laps_2.loc[:, "Distance"] / df_telemetry_laps_2.loc[df_telemetry_laps_2.index[-1], "Distance"] * df_telemetry_laps.loc[df_telemetry_laps.index[-1], "Distance"]
                     df_telemetry_laps = pd.concat([df_telemetry_laps, df_telemetry_laps_2])
             else:
                 tab_Telemetry.write("Please, select a lap or two in the Laps tab to display here the telemetry.")
@@ -573,10 +587,12 @@ if driver_selected[0]:
             df_telemetry_laps = select_laps_1.pick_laps(laps_display_1.selection["rows"][0]+1).get_car_data().add_distance()
             df_telemetry_laps.loc[:,"LapN"] = 1
             df_telemetry_laps.loc[:,"Driver"] = select_session.results.loc[select_session.results["DriverNumber"]==st.session_state.sel_telem_1,"Abbreviation"].iloc[0]
+            df_telemetry_laps.loc[:,"Distance_r"] = df_telemetry_laps.loc[:,"Distance"]
             if laps_selected[0]>1:
                 df_telemetry_laps_2 = select_laps_1.pick_laps(laps_display_1.selection["rows"][1]+1).get_car_data().add_distance()
                 df_telemetry_laps_2.loc[:,"LapN"] = 2
                 df_telemetry_laps_2.loc[:,"Driver"] = select_session.results.loc[select_session.results["DriverNumber"]==st.session_state.sel_telem_1,"Abbreviation"].iloc[0]
+                df_telemetry_laps_2.loc[:,"Distance_r"] = df_telemetry_laps_2.loc[:, "Distance"] / df_telemetry_laps_2.loc[df_telemetry_laps_2.index[-1], "Distance"] * df_telemetry_laps.loc[df_telemetry_laps.index[-1], "Distance"]
                 df_telemetry_laps = pd.concat([df_telemetry_laps, df_telemetry_laps_2])
         else:
             tab_Telemetry.write("Please, select a lap or two in the Laps tab to display here the telemetry.")
@@ -646,8 +662,8 @@ def show_metrics_lap_2(index=0, isFirst=True):
 
 if (driver_selected[0] & (laps_selected[0]>0)) | (driver_selected[1] & (laps_selected[1]>0)):
     df_telemetry_laps.loc[:,"Time_Q"] = df_telemetry_laps.loc[:,"Time"].map(convert_time_float)
-    T_col = ["Driver", "LapN", "Time_Q", "RPM", "Speed", "nGear", "Throttle", "Brake", "DRS", "Distance"]
-    T_view = {"Time_Q":"Time (s)", "Speed":"Speed (km/h)", "nGear":"Gear", "Throttle":"Throttle (%)", "Distance":"Distance (m)"}
+    T_col = ["Driver", "LapN", "Time_Q", "RPM", "Speed", "nGear", "Throttle", "Brake", "DRS", "Distance_r"]
+    T_view = {"Time_Q":"Time (s)", "Speed":"Speed (km/h)", "nGear":"Gear", "Throttle":"Throttle (%)", "Distance_r":"Distance (m)"}
     df_Telemetry = df_telemetry_laps.loc[:,T_col].rename(columns=T_view)
 
 ## Charts
