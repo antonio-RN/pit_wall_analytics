@@ -760,7 +760,7 @@ if (driver_selected[0] & (laps_selected[0]>0)) | (driver_selected[1] & (laps_sel
     x=alt.X("X (m)").axis(None),
     y=alt.Y("Y (m)").axis(None),
     color=alt.Color("Faster:N").scale(range=["blue", "cyan"]).legend(None),
-    #tooltip=None
+    tooltip=alt.value(None)
     ).properties(
         height=500,
         width=500
