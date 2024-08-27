@@ -48,6 +48,49 @@ st.set_page_config(
     layout="wide"
 )
 st.title("PitStop strategy")
+col1, col2 = st.columns(2)
+col3, col4, col5 = col1.columns(3)
+col6, col7 = col2.columns(2)
+
+# Info next event
+select_event_schedule = ff1.get_event_schedule(dt.datetime.now(dt.timezone.utc).year, include_testing=False)
+select_event_schedule= select_event_schedule.assign(
+    Session1_UTC=lambda df: df.loc[:,"Session1DateUtc"].map(lambda ele: ele.tz_localize("utc")),
+    Session2_UTC=lambda df: df.loc[:,"Session2DateUtc"].map(lambda ele: ele.tz_localize("utc")),
+    Session3_UTC=lambda df: df.loc[:,"Session3DateUtc"].map(lambda ele: ele.tz_localize("utc")),
+    Session4_UTC=lambda df: df.loc[:,"Session4DateUtc"].map(lambda ele: ele.tz_localize("utc")),
+    Session5_UTC=lambda df: df.loc[:,"Session5DateUtc"].map(lambda ele: ele.tz_localize("utc")),
+)
+next_event = select_event_schedule.loc[select_event_schedule["Session5_UTC"] > dt.datetime.now(dt.timezone.utc),:].iloc[0]
+time_to_next_event = next_event.at["Session5_UTC"] - dt.datetime.now(dt.timezone.utc)
+
+# Input from user (year)
+st.session_state.sel_year = col3.selectbox(
+    "Season", options=range(2018, dt.datetime.now(dt.timezone.utc).year+1)[::-1], index=0
+)
+
+# Update info selected schedule, input from user (GP)
+if st.session_state.sel_year != dt.datetime.now(dt.timezone.utc).year:
+    select_event_schedule = ff1.get_event_schedule(st.session_state.sel_year, include_testing=False).sort_values("RoundNumber", ascending=False)
+rest_GPs = select_event_schedule.loc[select_event_schedule["Session5_UTC"] < dt.datetime.now(dt.timezone.utc),:]
+st.session_state.sel_GP = col4.selectbox(
+    "Grand Prix", options=rest_GPs.sort_values("RoundNumber", ascending=False).loc[:,"EventName"], index=0
+)
+select_session = load_data_session(st.session_state.sel_year, st.session_state.sel_GP, "Race", laps=True)
+
+# Update info selected schedule, input from user (GP session)
+list_available_sessions = select_event_schedule[select_event_schedule["EventName"] == st.session_state.sel_GP].loc[
+    :,["Session1", "Session2", "Session3", "Session4", "Session5"]
+].iloc[0].to_list()[::-1]
+session_options = ["Qualifying", "Sprint", "Race"]
+if (len(select_session.results)<1) | (len(select_session.results.loc[:,"Position"].unique())<5) |  (len(select_session.laps)<1):
+    session_options.remove("Race")
+
+list_select_sessions = [session for session in list_available_sessions if session in session_options]
+st.session_state.sel_GP_session = col5.selectbox(
+        "Session", options=list_select_sessions, index=0
+)
+
 tab_Home, tab_Results, tab_Laps, tab_Telemetry = st.tabs(["Home", "Results", "Laps", "Telemetry"])
 
 ## Tab HOME
@@ -61,18 +104,6 @@ colH1.write("""
         Navigate through the tabs ahead one by one, choose the GP and session you want to know more about and select the 
         driver(s) and lap(s) to compare head to head.
          """)
-
-# Info next event
-select_event_schedule = ff1.get_event_schedule(dt.datetime.now(dt.timezone.utc).year, include_testing=False)
-select_event_schedule= select_event_schedule.assign(
-    Session1_UTC=lambda df: df.loc[:,"Session1DateUtc"].map(lambda ele: ele.tz_localize("utc")),
-    Session2_UTC=lambda df: df.loc[:,"Session2DateUtc"].map(lambda ele: ele.tz_localize("utc")),
-    Session3_UTC=lambda df: df.loc[:,"Session3DateUtc"].map(lambda ele: ele.tz_localize("utc")),
-    Session4_UTC=lambda df: df.loc[:,"Session4DateUtc"].map(lambda ele: ele.tz_localize("utc")),
-    Session5_UTC=lambda df: df.loc[:,"Session5DateUtc"].map(lambda ele: ele.tz_localize("utc")),
-)
-next_event = select_event_schedule.loc[select_event_schedule["Session5_UTC"] > dt.datetime.now(dt.timezone.utc),:].iloc[0]
-time_to_next_event = next_event.at["Session5_UTC"] - dt.datetime.now(dt.timezone.utc)
 
 colH3, colH4 = colH2.columns(2)
 colH3.metric(
@@ -93,35 +124,6 @@ colH4.metric(
 )
 
 ## Tab RESULTS
-# Input from user (year)
-colR1, colR2 = tab_Results.columns(2)
-colR3, colR4, colR5 = colR1.columns(3)
-st.session_state.sel_year = colR3.selectbox(
-    "Season", options=range(2018, dt.datetime.now(dt.timezone.utc).year+1)[::-1], index=0
-)
-
-# Update info selected schedule, input from user (GP)
-if st.session_state.sel_year != dt.datetime.now(dt.timezone.utc).year:
-    select_event_schedule = ff1.get_event_schedule(st.session_state.sel_year, include_testing=False).sort_values("RoundNumber", ascending=False)
-rest_GPs = select_event_schedule.loc[select_event_schedule["Session5_UTC"] < dt.datetime.now(dt.timezone.utc),:]
-st.session_state.sel_GP = colR4.selectbox(
-    "Grand Prix", options=rest_GPs.sort_values("RoundNumber", ascending=False).loc[:,"EventName"], index=0
-)
-select_session = load_data_session(st.session_state.sel_year, st.session_state.sel_GP, "Race", laps=True)
-
-# Update info selected schedule, input from user (GP session)
-list_available_sessions = select_event_schedule[select_event_schedule["EventName"] == st.session_state.sel_GP].loc[
-    :,["Session1", "Session2", "Session3", "Session4", "Session5"]
-].iloc[0].to_list()[::-1]
-session_options = ["Qualifying", "Sprint", "Race"]
-if (len(select_session.results)<1) | (len(select_session.results.loc[:,"Position"].unique())<5) |  (len(select_session.laps)<1):
-    session_options.remove("Race")
-
-list_select_sessions = [session for session in list_available_sessions if session in session_options]
-st.session_state.sel_GP_session = colR5.selectbox(
-        "Session", options=list_select_sessions, index=0
-)
-
 # Load data with Laps info
 select_session = load_data_session(st.session_state.sel_year, st.session_state.sel_GP, st.session_state.sel_GP_session, laps=True)
 select_session_results = select_session.results.copy()
@@ -146,13 +148,18 @@ elif ((st.session_state.sel_GP_session == "Race") | (st.session_state.sel_GP_ses
     results_R_view = {"DriverNumber":"Number", "BroadcastName":"Driver", "TeamName":"Team", "Time_str":"Leader"}
     st.session_state.results = select_session_results.loc[:,results_R_col].rename(columns=results_R_view)
 
+driver_selection = col6.multiselect(
+    "Drivers", 
+    options=st.session_state.results.loc[:,"Driver"],
+    max_selections=2,
+    key="driver_selection")
+
 # Results display and input from user (driver selected)
-results_display = colR1.dataframe(
+colR1, colR2 = tab_Results.columns(2)
+colR1.dataframe(
         st.session_state.results,
         hide_index=True,
         use_container_width=True,
-        on_select="rerun",
-        selection_mode="multi-row",
         key="results_display"
     )
 
@@ -252,14 +259,14 @@ colR9.altair_chart(alt_R3)
 
 ## Tab LAPS
 # Load data with Laps from selected driver(s)
-if len(results_display.selection["rows"]):
+if len(driver_selection):
 
 # Driver #1
-    st.session_state.sel_driver_1 = st.session_state.results.loc[st.session_state.results.index[results_display.selection["rows"][0]],"Number"]
+    st.session_state.sel_driver_1 = st.session_state.results.loc[st.session_state.results.loc[:,"Driver"]==driver_selection[0],"Number"].iloc[0]
     select_laps_1 = select_session.laps.pick_driver(st.session_state.sel_driver_1)
 # Driver #2 (if exists)
     try:
-        st.session_state.sel_driver_2 = st.session_state.results.loc[st.session_state.results.index[results_display.selection["rows"][1]],"Number"]
+        st.session_state.sel_driver_2 = st.session_state.results.loc[st.session_state.results.loc[:,"Driver"]==driver_selection[1],"Number"].iloc[0]
         select_laps_2 = select_session.laps.pick_driver(st.session_state.sel_driver_2)
 
 # Data formatting  
@@ -301,22 +308,22 @@ if len(results_display.selection["rows"]):
     colL3, colL4 = colL2.columns(2)
     colL3.metric(
         "Driver",
-        select_session.results.loc[select_session.results.loc[:,"DriverNumber"]==st.session_state.sel_driver_1,"BroadcastName"].iloc[0]
+        driver_selection[0]
     )
     colL3.metric(
         "Final position",
-        int(select_session.results.loc[select_session.results.loc[:,"DriverNumber"]==st.session_state.sel_driver_1,"Position"].iloc[0])
+        int(st.session_state.results.loc[st.session_state.results.loc[:,"Driver"]==driver_selection[0],"Position"].iloc[0])
     )
     colL3.metric(
         "Number of pit stops",
-        int(select_laps_1.loc[select_laps_1.index[-1],"Stint"]-1)
+        int(st.session_state.laps_1.loc[st.session_state.laps_1.index[-1],"Stint"]-1)
     )
     best_personal_1 = select_laps_1.loc[select_laps_1["IsPersonalBest"]==True,"LapTime"].iloc[-1]
     colL4.metric(
         f"Best personal lap",
         convert_time_string(best_personal_1)
     )
-    best_sectors_index_1 = select_laps_1.loc[:,["Sector1Time", "Sector2Time", "Sector3Time"]].apply(np.argmin, axis=0)
+    best_sectors_index_1 = select_laps_1.loc[:,["Sector1Time", "Sector2Time", "Sector3Time"]].apply(np.argmin, axis=0)      ##CAMBIAR A IDXMIN
     best_sectors_1 = [
         select_laps_1.loc[select_laps_1.index[best_sectors_index_1.iat[0]],"Sector1Time"],
         select_laps_1.loc[select_laps_1.index[best_sectors_index_1.iat[1]],"Sector2Time"],
@@ -359,15 +366,15 @@ if len(results_display.selection["rows"]):
         colL33, colL44 = colL22.columns(2)
         colL33.metric(
             "Driver",
-            select_session.results.loc[select_session.results.loc[:,"DriverNumber"]==st.session_state.sel_driver_2,"BroadcastName"].iloc[0]
+            driver_selection[1]
         )
         colL33.metric(
             "Final position",
-            int(select_session.results.loc[select_session.results.loc[:,"DriverNumber"]==st.session_state.sel_driver_2,"Position"].iloc[0])
+            int(st.session_state.results.loc[st.session_state.results.loc[:,"Driver"]==driver_selection[1],"Position"].iloc[0])
         )
         colL33.metric(
             "Number of pit stops",
-            int(select_laps_2.loc[select_laps_2.index[-1],"Stint"]-1)
+            int(st.session_state.laps_2.loc[st.session_state.laps_2.index[-1],"Stint"]-1)
         )
 
         best_personal_2 = select_laps_2.loc[select_laps_2["IsPersonalBest"]==True,"LapTime"].iloc[-1]
@@ -423,7 +430,7 @@ if len(results_display.selection["rows"]):
     tab_Laps.divider()
 
 # Chart #1: Lap time vs lap (only with 2 drivers selected)
-    if len(results_display.selection["rows"])>1:
+    if len(driver_selection)>1:
         colL5, colL6 = tab_Laps.columns(2)
         alt_L1_base = alt.Chart(df_select_laps, title="Lap times (s) per stint").mark_point(
             filled=True,
@@ -520,7 +527,25 @@ if len(results_display.selection["rows"]):
         else:
             tab_Laps.altair_chart(alt_L3_left)
 else:
-    tab_Laps.write("Please, select a driver or two in the Results tab to display here the complete set of laps.")
+    tab_Laps.write("Please, select a driver or two in the Drivers tab to display here the complete set of laps.")
+
+laps_list = [f"Lap {int(lap)} | {select_session.results.loc[select_session.results.loc[:,"BroadcastName"]==driver, "Abbreviation"].iloc[0]}"
+            for _,driver in enumerate(driver_selection)
+            for lap in df_select_laps.loc[df_select_laps.loc[:,"Driver"]==select_session.results.loc[select_session.results.loc[:,"BroadcastName"]==driver, "Abbreviation"].iloc[0],"LapNumber"]
+            ]
+laps_selection = col7.multiselect(
+    "Laps",
+    options = laps_list,
+    max_selections=2,
+    key="laps_selection"
+)
+
+list_laps_selection = [(selection.split(" ")[-1], int(selection.split(" ")[1])) for selection in laps_selection]
+if len(laps_selection):
+    st.session_state.sel_telem_1 = select_session.results.loc[select_session.results.loc[:,"Abbreviation"]==list_laps_selection[0][0],"DriverNumber"].iloc[0]
+    tab_Telemetry.write(f"sel_telem_1: {st.session_state.sel_telem_1}")
+    if len(laps_selection)>1:
+        st.session_state.sel_telem_2 = select_session.results.loc[select_session.results.loc[:,"Abbreviation"]==list_laps_selection[1][0],"DriverNumber"].iloc[0 ]
 
 ## Tab TELEMETRY
 # Laps selected logic
