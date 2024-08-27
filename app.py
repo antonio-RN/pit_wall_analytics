@@ -565,21 +565,25 @@ if driver_selected[0]:
             select_session = load_data_session(st.session_state.sel_year, st.session_state.sel_GP, st.session_state.sel_GP_session, laps=True, telemetry=True)
             st.session_state.sel_telem_1 = st.session_state.sel_driver_1
             select_laps_1 = select_session.laps.pick_driver(st.session_state.sel_telem_1)
-            df_telemetry_laps = select_laps_1.pick_laps(laps_display_1.selection["rows"][0]+1).get_telemetry()
+            select_lap_1 = select_laps_1.pick_laps(laps_display_1.selection["rows"][0]+1)
+            df_telemetry_laps = select_lap_1.get_telemetry()
             s_distance = range(0,round(df_telemetry_laps.loc[df_telemetry_laps.index[-1],"Distance"]+4),4)
             s_driver_1 = select_session.results.loc[select_session.results["DriverNumber"]==st.session_state.sel_telem_1,"Abbreviation"].iloc[0]
             df_telemetry_laps_inter = inter_tel_data(s_distance, df_telemetry_laps, s_driver_1, 1)
             if laps_selected[1]:
                 st.session_state.sel_telem_2 = st.session_state.sel_driver_2
                 select_laps_2 = select_session.laps.pick_driver(st.session_state.sel_telem_2)
-                df_telemetry_laps_2 = select_laps_2.pick_laps(laps_display_2.selection["rows"][0]+1).get_telemetry()
+                select_lap_2 = select_laps_2.pick_laps(laps_display_2.selection["rows"][0]+1)
+                df_telemetry_laps_2 = select_lap_2.get_telemetry()
                 s_driver_2 = select_session.results.loc[select_session.results["DriverNumber"]==st.session_state.sel_telem_2,"Abbreviation"].iloc[0]
                 df_telemetry_laps_inter_2 = inter_tel_data(s_distance, df_telemetry_laps_2, s_driver_2, 2)
                 df_telemetry_laps_inter_2.loc[:,"Delta"] = [df_telemetry_laps_inter_2.iloc[i].at["Time"] - df_telemetry_laps_inter.iloc[i].at["Time"] for i,_ in enumerate(s_distance)]
                 df_telemetry_laps_inter = pd.concat([df_telemetry_laps_inter, df_telemetry_laps_inter_2])
             elif laps_selected[0]>1:
-                    df_telemetry_laps_2 = select_laps_1.pick_laps(laps_display_1.selection["rows"][1]+1).get_telemetry()
-                    df_telemetry_laps_inter_2 = inter_tel_data(s_distance, df_telemetry_laps_2, s_driver_1, 2)
+                    select_lap_2 = select_laps_1.pick_laps(laps_display_1.selection["rows"][1]+1)
+                    df_telemetry_laps_2 = select_lap_2.get_telemetry()
+                    s_driver_2 = s_driver_1
+                    df_telemetry_laps_inter_2 = inter_tel_data(s_distance, df_telemetry_laps_2, s_driver_2, 2)
                     df_telemetry_laps_inter_2.loc[:,"Delta"] = [df_telemetry_laps_inter_2.iloc[i].at["Time"] - df_telemetry_laps_inter.iloc[i].at["Time"] for i,_ in enumerate(s_distance)]
                     df_telemetry_laps_inter = pd.concat([df_telemetry_laps_inter, df_telemetry_laps_inter_2])
         else:
@@ -587,13 +591,16 @@ if driver_selected[0]:
                 select_session = load_data_session(st.session_state.sel_year, st.session_state.sel_GP, st.session_state.sel_GP_session, laps=True, telemetry=True)
                 st.session_state.sel_telem_1 = st.session_state.sel_driver_2
                 select_laps_1 = select_session.laps.pick_driver(st.session_state.sel_telem_1)
-                df_telemetry_laps = select_laps_1.pick_laps(laps_display_2.selection["rows"][0]+1).get_telemetry()
+                select_lap_1 = select_laps_1.pick_laps(laps_display_2.selection["rows"][0]+1)
+                df_telemetry_laps = select_lap_1.get_telemetry()
                 s_distance = range(0,round(df_telemetry_laps.loc[df_telemetry_laps.index[-1],"Distance"]+4),4)
                 s_driver_1 = select_session.results.loc[select_session.results["DriverNumber"]==st.session_state.sel_telem_1,"Abbreviation"].iloc[0]
                 df_telemetry_laps_inter = inter_tel_data(s_distance, df_telemetry_laps, s_driver_1, 1)
                 if laps_selected[1]>1:
-                    df_telemetry_laps_2 = select_laps_1.pick_laps(laps_display_2.selection["rows"][1]+1).get_telemetry()
-                    df_telemetry_laps_inter_2 = inter_tel_data(s_distance, df_telemetry_laps_2, s_driver_1, 2)
+                    select_lap_2 = select_laps_1.pick_laps(laps_display_2.selection["rows"][1]+1)
+                    df_telemetry_laps_2 = select_lap_2.get_telemetry()
+                    s_driver_2 = s_driver_1
+                    df_telemetry_laps_inter_2 = inter_tel_data(s_distance, df_telemetry_laps_2, s_driver_2, 2)
                     df_telemetry_laps_inter_2.loc[:,"Delta"] = [df_telemetry_laps_inter_2.iloc[i].at["Time"] - df_telemetry_laps_inter.iloc[i].at["Time"] for i,_ in enumerate(s_distance)]
                     df_telemetry_laps_inter = pd.concat([df_telemetry_laps_inter, df_telemetry_laps_inter_2])
             else:
@@ -603,13 +610,16 @@ if driver_selected[0]:
             select_session = load_data_session(st.session_state.sel_year, st.session_state.sel_GP, st.session_state.sel_GP_session, laps=True, telemetry=True)
             st.session_state.sel_telem_1 = st.session_state.sel_driver_1
             select_laps_1 = select_session.laps.pick_driver(st.session_state.sel_telem_1)
-            df_telemetry_laps = select_laps_1.pick_laps(laps_display_1.selection["rows"][0]+1).get_telemetry()
+            select_lap_1 = select_laps_1.pick_laps(laps_display_1.selection["rows"][0]+1)
+            df_telemetry_laps = select_lap_1.get_telemetry()
             s_distance = range(0,round(df_telemetry_laps.loc[df_telemetry_laps.index[-1],"Distance"]+4),4)
             s_driver_1 = select_session.results.loc[select_session.results["DriverNumber"]==st.session_state.sel_telem_1,"Abbreviation"].iloc[0]
             df_telemetry_laps_inter = inter_tel_data(s_distance, df_telemetry_laps, s_driver_1, 1)
             if laps_selected[0]>1:
-                df_telemetry_laps_2 = select_laps_1.pick_laps(laps_display_1.selection["rows"][1]+1).get_telemetry()
-                df_telemetry_laps_inter_2 = inter_tel_data(s_distance, df_telemetry_laps_2, s_driver_1, 2)
+                select_lap_2 = select_laps_1.pick_laps(laps_display_1.selection["rows"][1]+1)
+                df_telemetry_laps_2 = select_lap_2.get_telemetry()
+                s_driver_2 = s_driver_1
+                df_telemetry_laps_inter_2 = inter_tel_data(s_distance, df_telemetry_laps_2, s_driver_2, 2)
                 df_telemetry_laps_inter_2.loc[:,"Delta"] = [df_telemetry_laps_inter_2.iloc[i].at["Time"] - df_telemetry_laps_inter.iloc[i].at["Time"] for i,_ in enumerate(s_distance)]
                 df_telemetry_laps_inter = pd.concat([df_telemetry_laps_inter, df_telemetry_laps_inter_2])
         else:
@@ -631,20 +641,20 @@ def show_metrics_lap_1(index=0, isFirst=True):
         annotated_text((select_session.results.loc[select_session.results.loc[:,"DriverNumber"]==st.session_state.sel_telem_1,"BroadcastName"].iloc[0], "", color_back, color_text))
         st.metric(
             "Lap number",
-            int(select_laps_1.at[select_laps_1.index[laps_display_1.selection["rows"][index]],"LapNumber"])
+            int(select_lap_1.at[select_lap_1.index[0],"LapNumber"])
         )
         st.metric(
             "Compound",
-            select_laps_1.at[select_laps_1.index[laps_display_1.selection["rows"][index]],"Compound"]
+            select_lap_1.at[select_lap_1.index[0], "Compound"]
         )
         st.metric(
             "Lap time",
-            convert_time_string(select_laps_1.at[select_laps_1.index[laps_display_1.selection["rows"][index]],"LapTime"])
+            convert_time_string(select_lap_1.at[select_lap_1.index[0], "LapTime"])
         )
         st.metric(
             "Personal best",
             convert_time_string(best_personal_1),
-            delta=f"-{convert_time_string(select_laps_1.at[select_laps_1.index[laps_display_1.selection["rows"][index]],"LapTime"]-best_personal_1)}",
+            delta=f"-{convert_time_string(select_lap_1.at[select_lap_1.index[0], "LapTime"]-best_personal_1)}",
             delta_color="inverse"
         )
         pass
@@ -660,20 +670,20 @@ def show_metrics_lap_2(index=0, isFirst=True):
         annotated_text((select_session.results.loc[select_session.results.loc[:,"DriverNumber"]==st.session_state.sel_telem_2,"BroadcastName"].iloc[0], "", color_back, color_text))
         st.metric(
             "Lap number",
-            int(select_laps_2.at[select_laps_2.index[laps_display_2.selection["rows"][index]],"LapNumber"])
+            int(select_lap_2.at[select_lap_2.index[0], "LapNumber"])
         )
         st.metric(
             "Compound",
-            select_laps_2.at[select_laps_2.index[laps_display_2.selection["rows"][index]],"Compound"]
+            select_lap_2.at[select_lap_2.index[0], "Compound"]
         )
         st.metric(
             "Lap time",
-            convert_time_string(select_laps_2.at[select_laps_2.index[laps_display_2.selection["rows"][index]],"LapTime"])
+            convert_time_string(select_lap_2.at[select_lap_2.index[0], "LapTime"])
         )
         st.metric(
             "Personal best",
             convert_time_string(best_personal_2),
-            delta=f"-{convert_time_string(select_laps_2.at[select_laps_2.index[laps_display_2.selection["rows"][index]],"LapTime"]-best_personal_2)}",
+            delta=f"-{convert_time_string(select_lap_2.loc[select_lap_2.index[0], "LapTime"]-best_personal_2)}",
             delta_color="inverse"
         )
     pass
@@ -681,6 +691,31 @@ def show_metrics_lap_2(index=0, isFirst=True):
 if (driver_selected[0] & (laps_selected[0]>0)) | (driver_selected[1] & (laps_selected[1]>0)):
     T_view = {"Distance":"Distance (m)", "Time":"Time (s)", "Speed":"Speed (km/h)", "nGear":"Gear", "Throttle":"Throttle (%)", "Delta":"Delta (s)"}
     df_Telemetry = df_telemetry_laps_inter.rename(columns=T_view)
+
+# Calculate fastest driver per minisectors
+    try:
+        minisectors = select_session.get_circuit_info().marshal_sectors.loc[:,"Distance"].sort_values().reset_index().drop(columns=["index"])
+        list_minisectors = [df_Telemetry.loc[df_Telemetry["Distance (m)"]<minisectors.loc[minisectors.index[x],"Distance"],["LapN", "Time (s)"]].groupby("LapN").max().loc[:,"Time (s)"] for x in minisectors.index]
+        df_minisectors = pd.DataFrame(list_minisectors).T
+        df_minisectors.columns = minisectors.index.to_list()
+        df_delta_minisectors = df_minisectors.apply(
+            lambda s: s - s.shift(), axis=1
+        )
+        df_delta_minisectors.loc[:,0] = df_minisectors.loc[:,0]
+        df_delta_minisectors = df_delta_minisectors.join(
+        pd.Series([
+            convert_time_float(select_lap_1.loc[select_lap_1.index[0], "LapTime"]) - df_delta_minisectors.iloc[0,:].sum(),
+            convert_time_float(select_lap_2.loc[select_lap_2.index[0], "LapTime"]) - df_delta_minisectors.iloc[1,:].sum()
+            ], index=[1,2], name=df_delta_minisectors.columns[-1]+1)
+        )
+        df_delta_minisectors = df_delta_minisectors.T
+        df_delta_minisectors.loc[:,"faster"] = df_delta_minisectors.apply(lambda s: s.iloc[0]<s.iloc[1], axis=1)
+        distances = [0] + minisectors.loc[:,"Distance"].to_list() + [float(df_Telemetry.loc[:,"Distance (m)"].max())]
+        faster = pd.cut(df_telemetry_laps_inter.loc[:,"Distance"], bins=distances, labels=df_delta_minisectors.loc[:,"faster"], right=False, ordered=False)
+        faster.name = "Faster"
+        df_telemetry_laps_inter = df_telemetry_laps_inter.join(faster)
+    except:
+        pass
 
 ## Charts
 # Chart #1: Composition chart with car data vs distance  
@@ -699,20 +734,40 @@ if (driver_selected[0] & (laps_selected[0]>0)) | (driver_selected[1] & (laps_sel
     ).repeat(
         row=["Speed (km/h)", "Delta (s)", "Throttle (%)", "Brake", "RPM", "Gear"]
     ).resolve_scale(x="shared").interactive()
-
     colT1.altair_chart(alt_T1, use_container_width=True)
 
-#Chart #2: Car speed vs car position (XYZ coordinates)
-    alt_T2 = alt.Chart(df_Telemetry).mark_point().encode(
-        x=alt.X("X (m)"),
-        y=alt.Y("Y (m)"),
-        color=alt.Color("Speed (km/h)").scale(scheme="lightgreyred")
+# Chart #2: Car speed vs car position (XYZ coordinates)
+    alt_T2 = alt.Chart(df_Telemetry, title="Vehicle speed (km/h)").mark_point().encode(
+        x=alt.X("X (m)").axis(None),
+        y=alt.Y("Y (m)").axis(None),
+        color=alt.Color("Speed (km/h)").scale(scheme="lightgreyred"),
+        tooltip=alt.Tooltip(field="Speed (km/h)", formatType="number", format="d")
     ).properties(
-        height=600,
+        height=500,
         width=600
-    )
+    ).configure_axis(
+            grid=False
+        )
+    colT3, colT4 = tab_Telemetry.columns(2)
+    colT3.altair_chart(alt_T2)
 
-    colT1.altair_chart(alt_T2)
+# Chart #3: Fastest minisector vs car position (XYZ coordinates)
+
+    alt_T3 = alt.Chart(df_telemetry_laps_inter, title="Lap dominance per minisector").mark_point(
+    filled=True,
+    size=50
+).encode(
+    x=alt.X("X (m)").axis(None),
+    y=alt.Y("Y (m)").axis(None),
+    color=alt.Color("Faster:N").scale(range=["blue", "cyan"]).legend(None),
+    #tooltip=None
+    ).properties(
+        height=500,
+        width=500
+    ).configure_axis(
+        grid=False
+    )
+    colT4.altair_chart(alt_T3)
 
 # Selected laps info display
 if driver_selected[0]:
