@@ -149,7 +149,8 @@ elif ((st.session_state.sel_GP_session == "Race") | (st.session_state.sel_GP_ses
 
 # Input from user (driver)
 driver_selection = col6.multiselect(
-    "Drivers", 
+    "Drivers",
+    placeholder="Select drivers",
     options=st.session_state.results.loc[:,"Driver"],
     max_selections=2,
     key="driver_selection")
@@ -295,7 +296,7 @@ if len(driver_selection)>0:
     st.session_state.laps_1 = select_laps_1.loc[:,laps_L_col].rename(columns=laps_L_view)
 
 # Laps display (driver #1) and input from user (laps selected)
-    colL1.dataframe(
+    laps_display_1 = colL1.dataframe(
         st.session_state.laps_1,
         hide_index=True,
         use_container_width=True,
@@ -350,7 +351,7 @@ if len(driver_selection)>0:
     if len(driver_selection)>1:
         st.session_state.laps_2 = select_laps_2.loc[:,laps_L_col].rename(columns=laps_L_view)
         colL11, colL22 = tab_Laps.columns(2)
-        colL11.dataframe(
+        laps_display_2 = colL11.dataframe(
             st.session_state.laps_2,
             hide_index=True,
             use_container_width=True,
@@ -534,6 +535,7 @@ laps_list = [f"Lap {int(lap)} | {select_session.results.loc[select_session.resul
 # Input from user (lap)
 laps_selection = col7.multiselect(
     "Laps",
+    placeholder="Select laps",
     options = laps_list,
     max_selections=2,
     key="laps_selection"
@@ -576,22 +578,22 @@ def butter_lowpass_filter(data, cutoff, fs, order=4):
     y = filtfilt(b, a, data)
     return y
 
-# Longitudinal and lateral acceleration approximation
-def get_acceleration(original_df):
-    original_df.loc[:,["dxdt", "dydt"]] = pd.DataFrame(np.gradient(original_df.loc[:,["X (m)", "Y (m)"]], original_df.loc[:,"Time"], axis=0), columns=["dxdt", "dydt"])
-    original_df.loc[:,"dxdt"] = butter_lowpass_filter(original_df.loc[:,"dxdt"], cutoff=0.05, fs=1.0)
-    original_df.loc[:,"dydt"] = butter_lowpass_filter(original_df.loc[:,"dydt"], cutoff=0.05, fs=1.0)
-    original_df.loc[:,["ddxdt", "ddydt"]] = pd.DataFrame(np.gradient(original_df.loc[:,["dxdt", "dydt"]], original_df.loc[:,"Time"], axis=0), columns=["ddxdt", "ddydt"])
-    original_df.loc[:,"ddxdt"] = butter_lowpass_filter(original_df.loc[:,"ddxdt"], cutoff=0.05, fs=1.0)
-    original_df.loc[:,"ddydt"] = butter_lowpass_filter(original_df.loc[:,"ddydt"], cutoff=0.05, fs=1.0)
-    mod_dataframe = original_df.assign(
-        R=lambda df: (df.loc[:,"dxdt"]**2 + df.loc[:,"dydt"]**2)**1.5 / (df.loc[:,"dxdt"]*df.loc[:,"ddydt"] - df.loc[:,"dydt"]*df.loc[:,"ddxdt"])
-    )
-    mod_dataframe.loc[:,"ay"] = mod_dataframe.apply(lambda s: (s.at["Speed"]/3.6)**2/(9.81*s.at["R"]), axis=1)
-    mod_dataframe.loc[:,"ay_BB"] = butter_lowpass_filter(mod_dataframe.loc[:,"ay"], cutoff=0.3, fs=1.0)
-    mod_dataframe.loc[:,"ax"] = pd.DataFrame(np.gradient(mod_dataframe.loc[:,"Speed"]/3.6, mod_dataframe.loc[:,"Time"], axis=0)/9.81, columns=["ax"])
-    mod_dataframe.loc[:,"ax_BB"] = butter_lowpass_filter(mod_dataframe.loc[:,"ax"], cutoff=0.07, fs=1.0)
-    return mod_dataframe.drop(columns=["ax", "ay"]).rename(columns={"ax_BB":"Ax (g)", "ay_BB":"Ay (g)"})
+# # Longitudinal and lateral acceleration approximation
+# def get_acceleration(original_df):
+#     original_df.loc[:,["dxdt", "dydt"]] = pd.DataFrame(np.gradient(original_df.loc[:,["X (m)", "Y (m)"]], original_df.loc[:,"Time"], axis=0), columns=["dxdt", "dydt"])
+#     original_df.loc[:,"dxdt"] = butter_lowpass_filter(original_df.loc[:,"dxdt"], cutoff=0.05, fs=1.0) #0.05
+#     original_df.loc[:,"dydt"] = butter_lowpass_filter(original_df.loc[:,"dydt"], cutoff=0.05, fs=1.0) #0.05
+#     original_df.loc[:,["ddxdt", "ddydt"]] = pd.DataFrame(np.gradient(original_df.loc[:,["dxdt", "dydt"]], original_df.loc[:,"Time"], axis=0), columns=["ddxdt", "ddydt"])
+#     original_df.loc[:,"ddxdt"] = butter_lowpass_filter(original_df.loc[:,"ddxdt"], cutoff=0.05, fs=1.0) #0.05
+#     original_df.loc[:,"ddydt"] = butter_lowpass_filter(original_df.loc[:,"ddydt"], cutoff=0.05, fs=1.0) #0.05
+#     mod_dataframe = original_df.assign(
+#         R=lambda df: (df.loc[:,"dxdt"]**2 + df.loc[:,"dydt"]**2)**1.5 / (df.loc[:,"dxdt"]*df.loc[:,"ddydt"] - df.loc[:,"dydt"]*df.loc[:,"ddxdt"])
+#     )
+#     mod_dataframe.loc[:,"ay"] = mod_dataframe.apply(lambda s: (s.at["Speed"]/3.6)**2/(9.81*s.at["R"]), axis=1)
+#     mod_dataframe.loc[:,"ay_BB"] = butter_lowpass_filter(mod_dataframe.loc[:,"ay"], cutoff=0.3, fs=1.0) #0.3
+#     mod_dataframe.loc[:,"ax"] = pd.DataFrame(np.gradient(mod_dataframe.loc[:,"Speed"]/3.6, mod_dataframe.loc[:,"Time"], axis=0)/9.81, columns=["ax"])
+#     mod_dataframe.loc[:,"ax_BB"] = butter_lowpass_filter(mod_dataframe.loc[:,"ax"], cutoff=0.07, fs=1.0) #0.07
+#     return mod_dataframe.drop(columns=["ax", "ay"]).rename(columns={"ax_BB":"Ax (g)", "ay_BB":"Ay (g)"})
 
 # Load data with Telemetry from selected laps & data formatting
 if len(list_laps_selection)>0:
@@ -599,19 +601,23 @@ if len(list_laps_selection)>0:
     select_laps_1 = select_session.laps.pick_driver(st.session_state.sel_telem_1)
     select_lap_1 = select_laps_1.pick_laps(list_laps_selection[0][1])
     df_telemetry_laps = select_lap_1.get_telemetry()
-    s_distance = range(0,round(df_telemetry_laps.at[df_telemetry_laps.index[-1],"Distance"]+5),5)
+    s_distance = range(0,round(df_telemetry_laps.at[df_telemetry_laps.index[-1],"Distance"]),4)
     s_driver_1 = list_laps_selection[0][0]
     df_telemetry_laps_inter = inter_tel_data(s_distance, df_telemetry_laps, s_driver_1, 1)
-    df_telemetry_laps_inter = get_acceleration(df_telemetry_laps_inter)
+    # df_telemetry_laps_inter = get_acceleration(df_telemetry_laps_inter)
     if len(list_laps_selection)>1:
         select_laps_2 = select_session.laps.pick_driver(st.session_state.sel_telem_2)
         select_lap_2 = select_laps_2.pick_laps(list_laps_selection[1][1])
         df_telemetry_laps_2 = select_lap_2.get_telemetry()
-        s_distance_2 = range(0,round(df_telemetry_laps_2.at[df_telemetry_laps_2.index[-1],"Distance"]+5),5)
+        s_distance_2 = range(0,round(df_telemetry_laps_2.at[df_telemetry_laps_2.index[-1],"Distance"]),4)
         s_driver_2 = list_laps_selection[1][0]
-        df_telemetry_laps_inter_2 = inter_tel_data(s_distance_2, df_telemetry_laps_2, s_driver_2, 2)
-        df_telemetry_laps_inter_2.loc[:,"Delta"] = [df_telemetry_laps_inter_2.iloc[i].at["Time"] - df_telemetry_laps_inter.iloc[i].at["Time"] for i,_ in enumerate(s_distance_2)]
-        df_telemetry_laps_inter_2 = get_acceleration(df_telemetry_laps_inter_2)
+        min_distance = s_distance
+        if len(s_distance_2)<len(s_distance):
+            min_distance = s_distance_2
+        df_telemetry_laps_inter_2 = inter_tel_data(min_distance, df_telemetry_laps_2, s_driver_2, 2)
+        df_telemetry_laps_inter = df_telemetry_laps_inter.iloc[:len(min_distance),:]
+        df_telemetry_laps_inter_2.loc[:,"Delta"] = [df_telemetry_laps_inter_2.iloc[i].at["Time"] - df_telemetry_laps_inter.iloc[i].at["Time"] for i,_ in enumerate(min_distance)]
+        # df_telemetry_laps_inter_2 = get_acceleration(df_telemetry_laps_inter_2)
         df_telemetry_laps_inter = pd.concat([df_telemetry_laps_inter, df_telemetry_laps_inter_2])
 else:
     tab_Telemetry.write("Please, select a lap or two in the Laps tab to display here the telemetry.")
@@ -658,9 +664,23 @@ def show_metrics_lap_2():
             "Compound",
             select_lap_2.at[select_lap_2.index[0], "Compound"]
         )
+        def calc_lap_dif():
+            lap_dif = select_lap_2.at[select_lap_2.index[0], "LapTime"] - select_lap_1.at[select_lap_1.index[0], "LapTime"]
+            isPositive = (convert_time_float(
+                select_lap_2.at[select_lap_2.index[0], "LapTime"]
+            ) - convert_time_float(
+                select_lap_1.at[select_lap_1.index[0], "LapTime"]
+            )) >= 0
+            if isPositive:
+                return ("+"+convert_time_string(lap_dif), True)
+            else:
+                return ("-"+convert_time_string(dt.timedelta(days=1)-lap_dif), False)
+    
         st.metric(
             "Lap time",
-            convert_time_string(select_lap_2.at[select_lap_2.index[0], "LapTime"])
+            convert_time_string(select_lap_2.at[select_lap_2.index[0], "LapTime"]),
+            delta=calc_lap_dif()[0],
+            delta_color="inverse"
         )
         best_personal = select_laps.loc[
             (select_laps.loc[:,"Driver"]==list_laps_selection[1][0]) & (select_laps.loc[:,"IsPersonalBest"]==True),"LapTime"
@@ -713,7 +733,7 @@ if len(list_laps_selection)>0:
         height=150, 
         width=950
     ).repeat(
-        row=["Speed (km/h)", "Delta (s)", "Ax (g)", "Ay (g)", "Throttle (%)", "Brake", "RPM", "Gear"]
+        row=["Speed (km/h)", "Delta (s)", "Throttle (%)", "Brake", "RPM", "Gear"]
     ).resolve_scale(x="shared").interactive()
     colT1.altair_chart(alt_T1, use_container_width=True)
 
@@ -749,20 +769,35 @@ if len(list_laps_selection)>0:
     )
     colT4.altair_chart(alt_T3)
 
-# Chart #4: g-g plot per driver
-    alt_T4 = alt.Chart(df_telemetry_laps_inter, title="g-g diagram").mark_point(
-    filled=True,
-    size=50
-    ).encode(
-    x=alt.X("Ay (g)"),
-    y=alt.Y("Ax (g)"),
-    color=alt.Color("LapN:N").scale(range=["blue", "cyan"]).legend(None),
-    #tooltip=alt.value(None)
-    ).properties(
-        height=500,
-        width=500
-    )
-    colT3.altair_chart(alt_T4)
+# # Chart #4: g-g plot per driver
+#     alt_T4 = alt.Chart(df_telemetry_laps_inter, title="g-g diagram").mark_point(
+#     #filled=True,
+#     size=50
+#     ).encode(
+#     x=alt.X("Ay (g)"),
+#     y=alt.Y("Ax (g)"),
+#     color=alt.Color("LapN:N").scale(range=["blue", "cyan"]).legend(None),
+#     #tooltip=alt.value(None)
+#     ).properties(
+#         height=500,
+#         width=500
+#     )
+#     colT3.altair_chart(alt_T4)
+
+# # Chart #5: lateral acceleration vs speed plot per driver
+#     alt_T4 = alt.Chart(df_telemetry_laps_inter, title="Lateral acceleration per speed").mark_point(
+#     filled=True,
+#     size=50
+#     ).encode(
+#     x=alt.X("Speed"),
+#     y=alt.Y("Ay (g)"),
+#     color=alt.Color("LapN:N").scale(range=["blue", "cyan"]).legend(None),
+#     #tooltip=alt.value(None)
+#     ).properties(
+#         height=500,
+#         width=500
+#     )
+#     colT4.altair_chart(alt_T4)
 
 # Selected laps info display
 if len(list_laps_selection)>0:
