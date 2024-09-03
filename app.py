@@ -374,9 +374,20 @@ if len(driver_selection)>0:
         )
 
         best_personal_2 = select_laps_2.loc[select_laps_2["IsPersonalBest"]==True,"LapTime"].iloc[-1]
+
+        def calc_lap_dif_1():
+            lap_dif = best_personal_2 - best_personal_1
+            isPositive = (convert_time_float(best_personal_2) - convert_time_float(best_personal_1)) >= 0
+            if isPositive:
+                return ("+"+convert_time_string(lap_dif))
+            else:
+                return ("-"+convert_time_string(dt.timedelta(days=1)-lap_dif))
+            
         colL44.metric(
             f"Best personal lap",
-            convert_time_string(best_personal_2)
+            convert_time_string(best_personal_2),
+            delta=calc_lap_dif_1(),
+            delta_color="inverse"
         )
         best_sectors_index_2 = select_laps_2.loc[:,["Sector1Time", "Sector2Time", "Sector3Time"]].apply(np.argmin, axis=0)
         best_sectors_2 = [
@@ -672,14 +683,14 @@ def show_metrics_lap_2():
                 select_lap_1.at[select_lap_1.index[0], "LapTime"]
             )) >= 0
             if isPositive:
-                return ("+"+convert_time_string(lap_dif), True)
+                return ("+"+convert_time_string(lap_dif))
             else:
-                return ("-"+convert_time_string(dt.timedelta(days=1)-lap_dif), False)
+                return ("-"+convert_time_string(dt.timedelta(days=1)-lap_dif))
     
         st.metric(
             "Lap time",
             convert_time_string(select_lap_2.at[select_lap_2.index[0], "LapTime"]),
-            delta=calc_lap_dif()[0],
+            delta=calc_lap_dif(),
             delta_color="inverse"
         )
         best_personal = select_laps.loc[
@@ -714,6 +725,7 @@ if len(list_laps_selection)>0:
         df_delta_minisectors = df_delta_minisectors.T
         df_delta_minisectors.loc[:,"faster"] = df_delta_minisectors.apply(lambda s: s.iloc[0]<s.iloc[1], axis=1)
         distances = [0] + minisectors.loc[:,"Distance"].to_list() + [float(df_Telemetry.loc[:,"Distance (m)"].max())]
+        distances.sort()
         faster = pd.cut(df_telemetry_laps_inter.loc[:,"Distance"], bins=distances, labels=df_delta_minisectors.loc[:,"faster"], right=False, ordered=False)
         faster.name = "Faster"
         df_telemetry_laps_inter = df_telemetry_laps_inter.join(faster)
