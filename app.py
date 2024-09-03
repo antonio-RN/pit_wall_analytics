@@ -140,7 +140,7 @@ if (st.session_state.sel_GP_session == "Qualifying"):
     st.session_state.results = select_session_results.loc[:,results_Q_col].rename(columns=results_Q_view)
 elif ((st.session_state.sel_GP_session == "Race") | (st.session_state.sel_GP_session =="Sprint")):
     select_session_results.loc[:,"Time_str"] = select_session_results.apply(
-        lambda s: convert_time_string(s.at["Time"]) if s.at["Position"]!="1" else pd.NaT,
+        lambda s: convert_time_string(s.at["Time"]) if int(s.at["Position"])!=1 else pd.NaT,
         axis=1
     )
     results_R_col = ["Position", "Status", "DriverNumber", "BroadcastName", "TeamName", "Time_str", "Points"]
@@ -182,7 +182,7 @@ colR7.metric("Race format",
 ## Data wrangling
 # Fuel correction estimation
 n_laps = int(max(select_session.laps.loc[:,"LapNumber"]))
-time_fuel_lap = (110+1)/n_laps*0.03
+time_fuel_lap = (110-1)/n_laps*0.03
 df_fuel_correction = pd.DataFrame({
     "LapNumber": [float(num) for num in range(1,1+n_laps)]
     }).assign(
@@ -240,7 +240,7 @@ if ((st.session_state.sel_GP_session == "Race") | (st.session_state.sel_GP_sessi
 
 # Chart #2: Lap time gap to P1 vs driver (only "Qualifying")
 else:
-    alt_R2 = alt.Chart(df_best_laps).mark_bar(clip=True).encode(
+    alt_R2 = alt.Chart(df_best_laps, title="Gap to best time (s)").mark_bar(clip=True).encode(
         y=alt.Y("Driver:N").sort(),
         x=alt.X("Gap:Q").scale(domain=(0,df_best_laps.iloc[-1,-1]*1.005)).axis(tickMinStep=0.1),
         color=alt.Color("Team:N").scale(domain=df_color_schema.loc[:,"TeamName"].unique(), range=df_color_schema.loc[:,"TeamColor"].unique()),
@@ -477,9 +477,9 @@ if len(driver_selection)>0:
         ).encode(
             alt.X("LapNumber").title("Lap"),
             alt.Y("LapTime_Q:Q").scale(zero=False).title("Lap time (s)"),
-            color=alt.Color("Compound:N").legend(None).scale(
+            color=alt.Color("Compound:N").scale(
                 domain=compound_list, range=compound_color
-            ),
+            ).legend(values=df_select_laps.loc[:,"Compound"].unique()),
             shape=alt.Shape("Stint:O").legend(None),
             tooltip= [
                 alt.Tooltip("LapNumber", title="Lap number"),
