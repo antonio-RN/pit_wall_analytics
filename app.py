@@ -43,10 +43,10 @@ def convert_time_float(timedelta_raw):
 
 # Page layout
 st.set_page_config(
-    page_title="PitStop strategy",
+    page_title="Telemetry analyF1cs",
     layout="wide"
 )
-st.title("PitStop strategy")
+st.title("Telemetry analyF1cs")
 col1, col2 = st.columns(2)
 col3, col4, col5 = col1.columns(3)
 col6, col7 = col2.columns(2)
@@ -94,7 +94,7 @@ tab_Home, tab_Results, tab_Laps, tab_Telemetry = st.tabs(["Home", "Results", "La
 # Layout
 colH1, colH2 = tab_Home.columns(2)
 colH1.write("""
-        Welcome to _PitStop strategy_ app. Your one-stop-shop for Formula 1 results, 
+        Welcome to _Telemetry analyF1cs_ app. Your one-stop-shop for Formula 1 results, 
         qualifying data, and in-depth analysis. Explore past races and qualifying sessions,
         visualize performance with our summarizing graphs, or dive into the details of each
         lap and car telemetry.
@@ -543,13 +543,19 @@ laps_list = [f"Lap {int(lap)} | {select_session.results.loc[select_session.resul
             for lap in df_select_laps.loc[df_select_laps.loc[:,"Driver"]==select_session.results.loc[select_session.results.loc[:,"BroadcastName"]==driver, "Abbreviation"].iloc[0],"LapNumber"]
             ]
 
+# Disable or not Driver input widget
+st.session_state.drivers_selected = False
+if len(driver_selection)>0:
+    st.session_state.drivers_selected = True
+
 # Input from user (lap)
 laps_selection = col7.multiselect(
     "Laps",
     placeholder="Select laps",
     options = laps_list,
     max_selections=2,
-    key="laps_selection"
+    key="laps_selection",
+    disabled=not(st.session_state.drivers_selected)
 )
 
 # Selected lap(s) input formatting
