@@ -43,10 +43,10 @@ def convert_time_float(timedelta_raw):
 
 # Page layout
 st.set_page_config(
-    page_title="Telemetry analyF1cs",
+    page_title="Pit Wall Analytics",
     layout="wide"
 )
-st.title("Telemetry analyF1cs")
+st.title("Pit Wall Analytics")
 col1, col2 = st.columns(2)
 col3, col4, col5 = col1.columns(3)
 col6, col7 = col2.columns(2)
@@ -94,8 +94,8 @@ tab_Home, tab_Results, tab_Laps, tab_Telemetry = st.tabs(["Home", "Results", "La
 # Layout
 colH1, colH2 = tab_Home.columns(2)
 colH1.write("""
-        Welcome to _Telemetry analyF1cs_ app. Your one-stop-shop for Formula 1 results, 
-        qualifying data, and in-depth analysis. Explore past races and qualifying sessions,
+        Welcome to _Pit Wall Analytics_ app. Your one-stop-shop for Formula 1 results, 
+        race & qualifying data, and in-depth analysis. Explore past races and qualifying sessions,
         visualize performance with our summarizing graphs, or dive into the details of each
         lap and car telemetry.
          
