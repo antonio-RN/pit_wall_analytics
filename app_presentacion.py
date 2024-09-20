@@ -43,10 +43,10 @@ def convert_time_float(timedelta_raw):
 
 # Page layout
 st.set_page_config(
-    page_title="PitStop strategy TFM",
+    page_title="Pit Wall Analytics TFM",
     layout="wide"
 )
-st.title("PitStop strategy")
+st.title("Pit Wall Analytics - TFM")
 col1, col2 = st.columns(2)
 col3, col4, col5 = col1.columns(3)
 col6, col7 = col2.columns(2)
@@ -103,7 +103,7 @@ st.session_state.sel_GP_session = col5.selectbox(
 )
 
 # colH1.write("""
-#         Welcome to _PitStop strategy_ app. Your one-stop-shop for Formula 1 results, 
+#         Welcome to _Pit Wall Analytics_ app. Your one-stop-shop for Formula 1 results, 
 #         qualifying data, and in-depth analysis. Explore past races and qualifying sessions,
 #         visualize performance with our summarizing graphs, or dive into the details of each
 #         lap and car telemetry.
