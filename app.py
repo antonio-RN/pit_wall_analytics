@@ -51,8 +51,30 @@ col1, col2 = st.columns(2)
 col3, col4, col5 = col1.columns(3)
 col6, col7 = col2.columns(2)
 
-# Info next event
-select_event_schedule = ff1.get_event_schedule(dt.datetime.now(dt.timezone.utc).year, include_testing=False)
+# First api call, current season (year) calendar
+select_event_schedule = ff1.get_event_schedule(dt.datetime.now(dt.timezone.utc).year, include_testing=False).sort_values("RoundNumber", ascending=False)
+select_event_schedule= select_event_schedule.assign(
+    Session5_UTC=lambda df: df.loc[:,"Session5DateUtc"].map(lambda ele: ele.tz_localize("utc")),
+)
+
+# Catch situation where there is no available session in current season
+if dt.datetime.now(dt.timezone.utc) < select_event_schedule.loc[:,"Session5_UTC"].iloc[-1]:
+    
+# Input from user (year), default to last year
+    st.session_state.sel_year = col3.selectbox(
+        "Season", options=range(2018, dt.datetime.now(dt.timezone.utc).year)[::-1], index=0
+    )
+    select_event_schedule_next = select_event_schedule.copy()
+    next_event = select_event_schedule_next.loc[select_event_schedule_next.loc[:,"Session5_UTC"] > dt.datetime.now(dt.timezone.utc),:].iloc[-1]
+
+else:
+
+    st.session_state.sel_year = col3.selectbox(
+        "Season", options=range(2018, dt.datetime.now(dt.timezone.utc).year+1)[::-1], index=0
+    )
+    next_event = select_event_schedule.loc[select_event_schedule.loc[:,"Session5_UTC"] > dt.datetime.now(dt.timezone.utc),:].iloc[-1]
+
+select_event_schedule = ff1.get_event_schedule(st.session_state.sel_year, include_testing=False).sort_values("RoundNumber", ascending=False)
 select_event_schedule= select_event_schedule.assign(
     Session1_UTC=lambda df: df.loc[:,"Session1DateUtc"].map(lambda ele: ele.tz_localize("utc")),
     Session2_UTC=lambda df: df.loc[:,"Session2DateUtc"].map(lambda ele: ele.tz_localize("utc")),
@@ -60,17 +82,9 @@ select_event_schedule= select_event_schedule.assign(
     Session4_UTC=lambda df: df.loc[:,"Session4DateUtc"].map(lambda ele: ele.tz_localize("utc")),
     Session5_UTC=lambda df: df.loc[:,"Session5DateUtc"].map(lambda ele: ele.tz_localize("utc")),
 )
-next_event = select_event_schedule.loc[select_event_schedule.loc[:,"Session5_UTC"] > dt.datetime.now(dt.timezone.utc),:].iloc[0]
+
+# Info from next event
 time_to_next_event = next_event.at["Session5_UTC"] - dt.datetime.now(dt.timezone.utc)
-
-# Input from user (year)
-st.session_state.sel_year = col3.selectbox(
-    "Season", options=range(2018, dt.datetime.now(dt.timezone.utc).year+1)[::-1], index=0
-)
-
-# Update info selected schedule (GPs), input from user (GP)
-if st.session_state.sel_year != dt.datetime.now(dt.timezone.utc).year:
-    select_event_schedule = ff1.get_event_schedule(st.session_state.sel_year, include_testing=False).sort_values("RoundNumber", ascending=False)
 rest_GPs = select_event_schedule.loc[select_event_schedule.loc[:,"Session5_UTC"] < dt.datetime.now(dt.timezone.utc),:]
 st.session_state.sel_GP = col4.selectbox(
     "Grand Prix", options=rest_GPs.sort_values("RoundNumber", ascending=False).loc[:,"EventName"], index=0
