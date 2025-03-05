@@ -6,4 +6,4 @@ visualize performance with our summarizing graphs, or dive into the details of e
 lap and car telemetry.
     
 
-The app can be used (here)[https://pit-wall-analytics.streamlit.app/].
+The app can be used [here](https://pit-wall-analytics.streamlit.app/).
