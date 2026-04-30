@@ -1,3 +1,4 @@
+import os
 import streamlit as st
 import fastf1 as ff1
 import datetime as dt
@@ -5,9 +6,15 @@ import pandas as pd
 import numpy as np
 import altair as alt
 from annotated_text import annotated_text
-from scipy.signal import butter, filtfilt
 
-ff1.ergast.interface.BASE_URL = "https://api.jolpi.ca/ergast/f1"
+ff1.ergast.interface.BASE_URL = os.getenv("ERGAST_API_URL", "https://api.jolpi.ca/ergast/f1")
+
+
+def to_utc(dt_obj):
+    if dt_obj.tzinfo is None:
+        return dt_obj.tz_localize("utc")
+    return dt_obj.tz_convert("utc")
+
 
 # Function definition
 def convert_time_string(timedelta_raw):
@@ -15,31 +22,54 @@ def convert_time_string(timedelta_raw):
         hours, rem = divmod(timedelta_raw.seconds, 3600)
         minutes, seconds = divmod(rem, 60)
         milliseconds = timedelta_raw.microseconds // 1000 
-        return str(f"{hours:02}:{minutes:02}:{seconds:02}.{milliseconds:03}")
-    else:
-        return pd.NaT
+        return f"{hours:02}:{minutes:02}:{seconds:02}.{milliseconds:03}"
+    return None
     
-#@st.cache_data
+@st.cache_resource(ttl=3600, show_spinner="Loading session data...")
 def load_data_session(year, event, session, laps=False, telemetry=False, weather=False):
     ff1_event = ff1.get_event(year=year, gp=event)
     ff1_session = ff1_event.get_session(session)
     ff1_session.load(laps=laps, telemetry=telemetry, weather=weather)
     return ff1_session
 
+@st.cache_resource(ttl=3600)
+def get_event_schedule_cached(year):
+    return ff1.get_event_schedule(year, include_testing=False)
+
+def compute_best_sectors(laps_df):
+    best_sectors_index = laps_df.loc[:, ["Sector1Time", "Sector2Time", "Sector3Time"]].apply(np.argmin, axis=0)
+    best_sectors = [
+        laps_df.loc[laps_df.index[best_sectors_index.iat[0]], "Sector1Time"],
+        laps_df.loc[laps_df.index[best_sectors_index.iat[1]], "Sector2Time"],
+        laps_df.loc[laps_df.index[best_sectors_index.iat[2]], "Sector3Time"]
+    ]
+    best_sectors.append(np.sum(best_sectors))
+    return best_sectors
+
+def compute_tyre_strategy(laps_df):
+    stint_starts = laps_df.loc[
+        (~laps_df.loc[:, "PitOutTime"].isna()) | (laps_df.loc[:, "LapNumber"] == 1), :
+    ]
+    return stint_starts.loc[:, "Compound"].apply(lambda item: item[0])
+
+def signed_lap_delta(lap_a, lap_b):
+    delta = lap_b - lap_a
+    is_positive = convert_time_float(lap_b) >= convert_time_float(lap_a)
+    if is_positive:
+        return "+" + convert_time_string(delta)
+    return "-" + convert_time_string(dt.timedelta(days=1) - delta)
+
 def convert_time_string_general(timedelta_raw):
     if pd.notna(timedelta_raw):
         days = timedelta_raw.days
         hours = timedelta_raw.seconds // 3600
-        return str(f"{days} day(s), {hours} hour(s)")
-    else:
-        return pd.NaT
-    
+        return f"{days} day(s), {hours} hour(s)"
+    return None
+
 def convert_time_float(timedelta_raw):
     if pd.notna(timedelta_raw):
-        milliseconds = timedelta_raw.microseconds // 1000 
-        return float(timedelta_raw.seconds)+milliseconds*0.001
-    else:
-        return pd.NaT
+        return timedelta_raw.total_seconds()
+    return None
 
 # Page layout
 st.set_page_config(
@@ -52,9 +82,9 @@ col3, col4, col5 = col1.columns(3)
 col6, col7 = col2.columns(2)
 
 # First api call, current season (year) calendar
-select_event_schedule = ff1.get_event_schedule(dt.datetime.now(dt.timezone.utc).year, include_testing=False).sort_values("RoundNumber", ascending=False)
+select_event_schedule = get_event_schedule_cached(dt.datetime.now(dt.timezone.utc).year).sort_values("RoundNumber", ascending=False)
 select_event_schedule= select_event_schedule.assign(
-    Session5_UTC=lambda df: df.loc[:,"Session5DateUtc"].map(lambda ele: ele.tz_localize("utc")),
+    Session5_UTC=lambda df: df.loc[:,"Session5DateUtc"].map(to_utc),
 )
 
 # Catch situation where there is no available session in current season
@@ -65,22 +95,24 @@ if dt.datetime.now(dt.timezone.utc) < select_event_schedule.loc[:,"Session5_UTC"
         "Season", options=range(2018, dt.datetime.now(dt.timezone.utc).year)[::-1], index=0
     )
     select_event_schedule_next = select_event_schedule.copy()
-    next_event = select_event_schedule_next.loc[select_event_schedule_next.loc[:,"Session5_UTC"] > dt.datetime.now(dt.timezone.utc),:].iloc[-1]
+    future_events = select_event_schedule_next.loc[select_event_schedule_next.loc[:,"Session5_UTC"] > dt.datetime.now(dt.timezone.utc), :]
+    next_event = future_events.iloc[-1] if not future_events.empty else select_event_schedule_next.iloc[-1]
 
 else:
 
     st.session_state.sel_year = col3.selectbox(
         "Season", options=range(2018, dt.datetime.now(dt.timezone.utc).year+1)[::-1], index=0
     )
-    next_event = select_event_schedule.loc[select_event_schedule.loc[:,"Session5_UTC"] > dt.datetime.now(dt.timezone.utc),:].iloc[-1]
+    future_events = select_event_schedule.loc[select_event_schedule.loc[:,"Session5_UTC"] > dt.datetime.now(dt.timezone.utc), :]
+    next_event = future_events.iloc[-1] if not future_events.empty else select_event_schedule.iloc[-1]
 
-select_event_schedule = ff1.get_event_schedule(st.session_state.sel_year, include_testing=False).sort_values("RoundNumber", ascending=False)
+select_event_schedule = get_event_schedule_cached(st.session_state.sel_year).sort_values("RoundNumber", ascending=False)
 select_event_schedule= select_event_schedule.assign(
-    Session1_UTC=lambda df: df.loc[:,"Session1DateUtc"].map(lambda ele: ele.tz_localize("utc")),
-    Session2_UTC=lambda df: df.loc[:,"Session2DateUtc"].map(lambda ele: ele.tz_localize("utc")),
-    Session3_UTC=lambda df: df.loc[:,"Session3DateUtc"].map(lambda ele: ele.tz_localize("utc")),
-    Session4_UTC=lambda df: df.loc[:,"Session4DateUtc"].map(lambda ele: ele.tz_localize("utc")),
-    Session5_UTC=lambda df: df.loc[:,"Session5DateUtc"].map(lambda ele: ele.tz_localize("utc")),
+    Session1_UTC=lambda df: df.loc[:,"Session1DateUtc"].map(to_utc),
+    Session2_UTC=lambda df: df.loc[:,"Session2DateUtc"].map(to_utc),
+    Session3_UTC=lambda df: df.loc[:,"Session3DateUtc"].map(to_utc),
+    Session4_UTC=lambda df: df.loc[:,"Session4DateUtc"].map(to_utc),
+    Session5_UTC=lambda df: df.loc[:,"Session5DateUtc"].map(to_utc),
 )
 
 # Info from next event
@@ -89,14 +121,14 @@ rest_GPs = select_event_schedule.loc[select_event_schedule.loc[:,"Session5_UTC"]
 st.session_state.sel_GP = col4.selectbox(
     "Grand Prix", options=rest_GPs.sort_values("RoundNumber", ascending=False).loc[:,"EventName"], index=0
 )
-select_session = load_data_session(st.session_state.sel_year, st.session_state.sel_GP, "Race", laps=True)
+select_session_race = load_data_session(st.session_state.sel_year, st.session_state.sel_GP, "Race", laps=True)
 
 # Update info selected schedule (GP sessions), input from user (GP session)
 list_available_sessions = select_event_schedule.loc[
     select_event_schedule.loc[:,"EventName"] == st.session_state.sel_GP,["Session1", "Session2", "Session3", "Session4", "Session5"]
 ].iloc[0].to_list()[::-1]
 session_options = ["Qualifying", "Sprint", "Race"]
-if (len(select_session.results)<1) | (len(select_session.results.loc[:,"Position"].unique())<5) |  (len(select_session.laps)<1):
+if (len(select_session_race.results)<1) or (len(select_session_race.results.loc[:,"Position"].unique())<5) or (len(select_session_race.laps)<1):
     session_options.remove("Race")
 list_select_sessions = [session for session in list_available_sessions if session in session_options]
 st.session_state.sel_GP_session = col5.selectbox(
@@ -142,6 +174,22 @@ colH4.metric(
 select_session = load_data_session(st.session_state.sel_year, st.session_state.sel_GP, st.session_state.sel_GP_session, laps=True)
 select_session_results = select_session.results.copy()
 
+driver_name_map = {
+    row["BroadcastName"]: {
+        "Number": row["DriverNumber"],
+        "Position": row["Position"],
+        "Abbreviation": row["Abbreviation"]
+    }
+    for _, row in select_session_results.iterrows()
+}
+driver_abbr_map = {
+    row["Abbreviation"]: {
+        "Number": row["DriverNumber"],
+        "BroadcastName": row["BroadcastName"]
+    }
+    for _, row in select_session_results.iterrows()
+}
+
 # Data formatting
 if (st.session_state.sel_GP_session == "Qualifying"):
     select_session_results = select_session_results.assign(
@@ -152,14 +200,18 @@ if (st.session_state.sel_GP_session == "Qualifying"):
     results_Q_col = ["Position", "DriverNumber", "BroadcastName", "TeamName", "Q1_str", "Q2_str", "Q3_str"]
     results_Q_view = {"BroadcastName":"Driver", "DriverNumber":"Number", "TeamName":"Team", "Q1_str":"Q1", "Q2_str":"Q2", "Q3_str":"Q3"}
     st.session_state.results = select_session_results.loc[:,results_Q_col].rename(columns=results_Q_view)
-elif ((st.session_state.sel_GP_session == "Race") | (st.session_state.sel_GP_session =="Sprint")):
+elif (st.session_state.sel_GP_session == "Race") or (st.session_state.sel_GP_session == "Sprint"):
     select_session_results.loc[:,"Time_str"] = select_session_results.apply(
-        lambda s: convert_time_string(s.at["Time"]) if int(s.at["Position"])!=1 else pd.NaT,
+        lambda s: convert_time_string(s.at["Time"]) if int(s.at["Position"])!=1 else None,
         axis=1
     )
     results_R_col = ["Position", "Status", "DriverNumber", "BroadcastName", "TeamName", "Time_str", "Points"]
     results_R_view = {"DriverNumber":"Number", "BroadcastName":"Driver", "TeamName":"Team", "Time_str":"Leader"}
     st.session_state.results = select_session_results.loc[:,results_R_col].rename(columns=results_R_view)
+else:
+    st.session_state.results = select_session_results.loc[
+        :, ["Position", "DriverNumber", "BroadcastName", "TeamName"]
+    ]
 
 # Input from user (driver)
 driver_selection = col6.multiselect(
@@ -168,6 +220,7 @@ driver_selection = col6.multiselect(
     options=st.session_state.results.loc[:,"Driver"],
     max_selections=2,
     key="driver_selection")
+driver_selection = driver_selection[:2]
 colR1, colR2 = tab_Results.columns(2)
 
 # Selected session results display
@@ -212,13 +265,15 @@ df_laps_position = select_session.laps.loc[:,["LapNumber", "Driver", "Position",
 
 # Lap time distribution vs team dataframe for charts
 df_total_laps = select_session.laps.pick_wo_box().pick_quicklaps().loc[:,["Driver", "Team", "LapNumber", "Stint", "Compound", "LapTime"]]
-try:
-    df_total_laps = df_total_laps.loc[df_total_laps.loc["LapNumber"]!=1,:]
-except:
-    pass
-df_total_laps.loc[:,"LapTime_Q"] = df_total_laps.loc[:,"LapTime"].map(convert_time_float).drop(columns=["LapTime"])
+if "LapNumber" in df_total_laps.columns:
+    df_total_laps = df_total_laps.loc[df_total_laps.loc[:, "LapNumber"] != 1, :]
+df_total_laps = df_total_laps.assign(
+    LapTime_Q=df_total_laps.loc[:, "LapTime"].map(convert_time_float)
+).drop(columns=["LapTime"])
 df_total_laps = df_total_laps.merge(df_fuel_correction, on="LapNumber", how="left")
-df_total_laps.loc[:,"LapTime_Q_corr"] = df_total_laps.apply(lambda s: s.at["LapTime_Q"]-s.at["FuelCorr"], axis=1).drop(columns=["FuelCorr"])
+df_total_laps = df_total_laps.assign(
+    LapTime_Q_corr=df_total_laps.loc[:, "LapTime_Q"] - df_total_laps.loc[:, "FuelCorr"]
+).drop(columns=["FuelCorr"])
 df_total_laps  = df_total_laps.merge(
     df_total_laps.loc[:,["Team", "LapTime_Q"]].groupby("Team").median().reset_index(), on="Team", suffixes=["", "_median"]
     )
@@ -234,9 +289,9 @@ tab_Results.divider()
 colR8, colR9 = tab_Results.columns(2)
 
 # Chart #1: Position vs lap (only "Race")
-if ((st.session_state.sel_GP_session == "Race") | (st.session_state.sel_GP_session =="Sprint")):
+if (st.session_state.sel_GP_session == "Race") or (st.session_state.sel_GP_session == "Sprint"):
     alt_R1_base = alt.Chart(df_laps_position, title="Race position").mark_line().encode(
-        alt.X("LapNumber:Q").scale(domain=[1,n_laps]).title("Lap").title("Lap number"),
+        alt.X("LapNumber:Q").scale(domain=[1,n_laps]).title("Lap number"),
         alt.Y("Position:Q").scale(domain=[20,1]).axis(tickCount=20, orient="left"),
         color=alt.Color("Driver:N").scale(domain=df_color_schema.loc[:,"Abbreviation"], range=df_color_schema.loc[:,"TeamColor"]),
         tooltip= ["Driver", alt.Tooltip("LapNumber", title="Lap number"), "Position"]
@@ -245,7 +300,7 @@ if ((st.session_state.sel_GP_session == "Race") | (st.session_state.sel_GP_sessi
         height=600
     )
     alt_R1_top = alt_R1_base.mark_point().encode(
-        alt.X("LapNumber:Q").scale(domain=[1,n_laps]).title("Lap").title("Lap number"),
+        alt.X("LapNumber:Q").scale(domain=[1,n_laps]).title("Lap number"),
         alt.Y("Position:Q").scale(domain=[20,1]).axis(tickCount=20, orient="right", title=""),
         color=alt.Color("Driver:N").scale(domain=df_color_schema.loc[:,"Abbreviation"], range=df_color_schema.loc[:,"TeamColor"]),
     )
@@ -268,7 +323,7 @@ else:
 # Chart #3: Lap time distribution vs team
 alt_R3 = alt.Chart(df_total_laps, title="Lap time distribution (s)").mark_boxplot().encode(
     x=alt.X("Team:N",sort=df_total_laps.sort_values("LapTime_Q_median", ascending=True).loc[:,"Team"].unique()),
-    y=alt.Y("LapTime_Q:Q").scale(zero=False).title("Lap time (s)").title("Lap time (s)"),
+    y=alt.Y("LapTime_Q:Q").scale(zero=False).title("Lap time (s)"),
     color=alt.Color("Team:N").scale(domain=df_color_schema.loc[:,"TeamName"].unique(), range=df_color_schema.loc[:,"TeamColor"].unique()),
 ).properties(
     width=600,
@@ -281,12 +336,12 @@ colR9.altair_chart(alt_R3)
 if len(driver_selection)>0:
 
 # Driver #1
-    st.session_state.sel_driver_1 = st.session_state.results.loc[st.session_state.results.loc[:,"Driver"]==driver_selection[0],"Number"].iloc[0]
+    st.session_state.sel_driver_1 = driver_name_map[driver_selection[0]]["Number"]
     select_laps_1 = select_session.laps.pick_driver(st.session_state.sel_driver_1)
 
 # Driver #2 (if exists)
     if len(driver_selection)>1:
-        st.session_state.sel_driver_2 = st.session_state.results.loc[st.session_state.results.loc[:,"Driver"]==driver_selection[1],"Number"].iloc[0]
+        st.session_state.sel_driver_2 = driver_name_map[driver_selection[1]]["Number"]
         select_laps_2 = select_session.laps.pick_driver(st.session_state.sel_driver_2)
 
 # Data formatting  
@@ -325,24 +380,19 @@ if len(driver_selection)>0:
     )
     colL3.metric(
         "Final position",
-        int(st.session_state.results.loc[st.session_state.results.loc[:,"Driver"]==driver_selection[0],"Position"].iloc[0])
+        driver_name_map[driver_selection[0]]["Position"]
     )
     colL3.metric(
         "Number of pit stops",
         int(st.session_state.laps_1.at[st.session_state.laps_1.index[-1],"Stint"]-1)
     )
-    best_personal_1 = select_laps_1.loc[select_laps_1.loc[:,"IsPersonalBest"]==True,"LapTime"].iloc[-1]
+    personal_best_laps_1 = select_laps_1.loc[select_laps_1.loc[:, "IsPersonalBest"] == True, "LapTime"]
+    best_personal_1 = personal_best_laps_1.iloc[-1] if not personal_best_laps_1.empty else pd.NaT
     colL4.metric(
         f"Best personal lap",
         convert_time_string(best_personal_1)
     )
-    best_sectors_index_1 = select_laps_1.loc[:,["Sector1Time", "Sector2Time", "Sector3Time"]].apply(np.argmin, axis=0)
-    best_sectors_1 = [
-        select_laps_1.loc[select_laps_1.index[best_sectors_index_1.iat[0]],"Sector1Time"],
-        select_laps_1.loc[select_laps_1.index[best_sectors_index_1.iat[1]],"Sector2Time"],
-        select_laps_1.loc[select_laps_1.index[best_sectors_index_1.iat[2]],"Sector3Time"]
-    ]
-    best_sectors_1.append(np.sum(best_sectors_1))
+    best_sectors_1 = compute_best_sectors(select_laps_1)
     diff_fictional_personal_best_1 = best_personal_1 - best_sectors_1[-1]
     colL4.metric(
         f"Best potential personal lap",
@@ -350,12 +400,7 @@ if len(driver_selection)>0:
         delta=f"-{convert_time_string(diff_fictional_personal_best_1)}",
         delta_color="inverse"
     )
-    select_laps_start_stint_1 = select_laps_1.loc[
-        (~select_laps_1.loc[:,"PitOutTime"].isna()) | (select_laps_1.loc[:,"LapNumber"] == 1),:
-    ]
-    tyre_strategy_1 = select_laps_start_stint_1.loc[:,"Compound"].apply(
-        lambda item: item[0]
-    )
+    tyre_strategy_1 = compute_tyre_strategy(select_laps_1)
     colL4.metric(
         "Tyre strategy",
         " - ".join(tyre_strategy_1)
@@ -380,36 +425,23 @@ if len(driver_selection)>0:
         )
         colL33.metric(
             "Final position",
-            int(st.session_state.results.loc[st.session_state.results.loc[:,"Driver"]==driver_selection[1],"Position"].iloc[0])
+            driver_name_map[driver_selection[1]]["Position"]
         )
         colL33.metric(
             "Number of pit stops",
             int(st.session_state.laps_2.at[st.session_state.laps_2.index[-1],"Stint"]-1)
         )
 
-        best_personal_2 = select_laps_2.loc[select_laps_2["IsPersonalBest"]==True,"LapTime"].iloc[-1]
+        personal_best_laps_2 = select_laps_2.loc[select_laps_2["IsPersonalBest"] == True, "LapTime"]
+        best_personal_2 = personal_best_laps_2.iloc[-1] if not personal_best_laps_2.empty else pd.NaT
 
-        def calc_lap_dif_1():
-            lap_dif = best_personal_2 - best_personal_1
-            isPositive = (convert_time_float(best_personal_2) - convert_time_float(best_personal_1)) >= 0
-            if isPositive:
-                return ("+"+convert_time_string(lap_dif))
-            else:
-                return ("-"+convert_time_string(dt.timedelta(days=1)-lap_dif))
-            
         colL44.metric(
             f"Best personal lap",
             convert_time_string(best_personal_2),
-            delta=calc_lap_dif_1(),
+            delta=signed_lap_delta(best_personal_1, best_personal_2),
             delta_color="inverse"
         )
-        best_sectors_index_2 = select_laps_2.loc[:,["Sector1Time", "Sector2Time", "Sector3Time"]].apply(np.argmin, axis=0)
-        best_sectors_2 = [
-            select_laps_2.loc[select_laps_2.index[best_sectors_index_2.iat[0]],"Sector1Time"],
-            select_laps_2.loc[select_laps_2.index[best_sectors_index_2.iat[1]],"Sector2Time"],
-            select_laps_2.loc[select_laps_2.index[best_sectors_index_2.iat[2]],"Sector3Time"]
-        ]
-        best_sectors_2.append(np.sum(best_sectors_2))
+        best_sectors_2 = compute_best_sectors(select_laps_2)
         diff_fictional_personal_best_2 = best_personal_2 - best_sectors_2[-1]
         colL44.metric(
             f"Best potential personal lap",
@@ -417,12 +449,7 @@ if len(driver_selection)>0:
             delta=f"-{convert_time_string(diff_fictional_personal_best_2)}",
             delta_color="inverse"
         )
-        select_laps_start_stint_2 = select_laps_2.loc[
-            (~select_laps_2.loc[:,"PitOutTime"].isna()) | (select_laps_2.loc[:,"LapNumber"] == 1),:
-        ]
-        tyre_strategy_2 = select_laps_start_stint_2.loc[:,"Compound"].apply(
-            lambda item: item[0]
-        )
+        tyre_strategy_2 = compute_tyre_strategy(select_laps_2)
         colL44.metric(
             "Tyre strategy",
             " - ".join(tyre_strategy_2)
@@ -443,13 +470,15 @@ if len(driver_selection)>0:
         df_select_laps = pd.concat([df_select_laps_1,df_select_laps_2])
     else:
         df_select_laps = df_select_laps_1.copy()
-    try:
-        df_select_laps = df_select_laps.loc[df_select_laps.loc[:,"LapNumber"]!=1,:]
-    except:
-        pass
+    if "LapNumber" in df_select_laps.columns:
+        df_select_laps = df_select_laps.loc[df_select_laps.loc[:, "LapNumber"] != 1, :]
     df_select_laps = df_select_laps.merge(df_fuel_correction, on="LapNumber", how="left")
-    df_select_laps.loc[:,"LapTime_Q"] = df_select_laps.loc[:,"LapTime"].map(convert_time_float).drop(columns=["LapTime"])
-    df_select_laps.loc[:,"LapTime_Q_corr"] = df_select_laps.apply(lambda s: s.at["LapTime_Q"]-s.at["FuelCorr"], axis=1).drop(columns=["FuelCorr"])
+    df_select_laps = df_select_laps.assign(
+        LapTime_Q=df_select_laps.loc[:, "LapTime"].map(convert_time_float)
+    ).drop(columns=["LapTime"])
+    df_select_laps = df_select_laps.assign(
+        LapTime_Q_corr=df_select_laps.loc[:, "LapTime_Q"] - df_select_laps.loc[:, "FuelCorr"]
+    ).drop(columns=["FuelCorr"])
     tab_Laps.divider()
 
 ## Charts
@@ -477,7 +506,7 @@ if len(driver_selection)>0:
             method="linear",
             groupby=["Driver", "Stint"]
         ).mark_line().encode()
-        if ((st.session_state.sel_GP_session == "Race") | (st.session_state.sel_GP_session =="Sprint")):
+        if (st.session_state.sel_GP_session == "Race") or (st.session_state.sel_GP_session == "Sprint"):
             alt_L1 = alt.layer(alt_L1_base, alt_L1_top)
             colL5.altair_chart(alt_L1)
         else:
@@ -539,7 +568,7 @@ if len(driver_selection)>0:
         ).mark_line().encode(
             color=alt.Color("Stint:O").legend(None),
             )
-        if ((st.session_state.sel_GP_session == "Race") | (st.session_state.sel_GP_session =="Sprint")):
+        if (st.session_state.sel_GP_session == "Race") or (st.session_state.sel_GP_session == "Sprint"):
             alt_L3 = alt.hconcat(
                 alt_L3_left, 
                 alt.layer(alt_L3_right_1, alt_L3_right_2).resolve_scale(color="independent")
@@ -548,14 +577,14 @@ if len(driver_selection)>0:
             tab_Laps.altair_chart(alt_L3)
         else:
             tab_Laps.altair_chart(alt_L3_left)
+
+    laps_list = [f"Lap {int(lap)} | {driver_name_map[driver]["Abbreviation"]}"
+                for _,driver in enumerate(driver_selection)
+                for lap in df_select_laps.loc[df_select_laps.loc[:,"Driver"]==driver_name_map[driver]["Abbreviation"],"LapNumber"]
+                ]
 else:
     tab_Laps.write("Please, select a driver or two in the Drivers tab to display here the complete set of laps.")
-
-# Laps list creation
-laps_list = [f"Lap {int(lap)} | {select_session.results.loc[select_session.results.loc[:,"BroadcastName"]==driver, "Abbreviation"].iloc[0]}"
-            for _,driver in enumerate(driver_selection)
-            for lap in df_select_laps.loc[df_select_laps.loc[:,"Driver"]==select_session.results.loc[select_session.results.loc[:,"BroadcastName"]==driver, "Abbreviation"].iloc[0],"LapNumber"]
-            ]
+    laps_list = []
 
 # Disable or not Driver input widget
 st.session_state.drivers_selected = False
@@ -571,13 +600,14 @@ laps_selection = col7.multiselect(
     key="laps_selection",
     disabled=not(st.session_state.drivers_selected)
 )
+laps_selection = laps_selection[:2]
 
 # Selected lap(s) input formatting
 list_laps_selection = [(selection.split(" ")[-1], int(selection.split(" ")[1])) for selection in laps_selection]
 if len(list_laps_selection)>0:
-    st.session_state.sel_telem_1 = select_session.results.loc[select_session.results.loc[:,"Abbreviation"]==list_laps_selection[0][0],"DriverNumber"].iloc[0]
+    st.session_state.sel_telem_1 = driver_abbr_map[list_laps_selection[0][0]]["Number"]
     if len(list_laps_selection)>1:
-        st.session_state.sel_telem_2 = select_session.results.loc[select_session.results.loc[:,"Abbreviation"]==list_laps_selection[1][0],"DriverNumber"].iloc[0]
+        st.session_state.sel_telem_2 = driver_abbr_map[list_laps_selection[1][0]]["Number"]
 
 ## Tab TELEMETRY
 ## Data wrangling
@@ -600,31 +630,6 @@ def inter_tel_data(s_distance, original_telem, driver, lap_n):
     if lap_n == 1:
         df_telem.loc[:,"Delta"] = [0 for x in s_distance]
     return df_telem
-
-# Low-pass filtering function
-def butter_lowpass_filter(data, cutoff, fs, order=4):
-    nyq = 0.5 * fs  # Nyquist frequency
-    normal_cutoff = cutoff / nyq
-    b, a = butter(order, normal_cutoff, btype='low', analog=False)
-    y = filtfilt(b, a, data)
-    return y
-
-# # Longitudinal and lateral acceleration approximation
-# def get_acceleration(original_df):
-#     original_df.loc[:,["dxdt", "dydt"]] = pd.DataFrame(np.gradient(original_df.loc[:,["X (m)", "Y (m)"]], original_df.loc[:,"Time"], axis=0), columns=["dxdt", "dydt"])
-#     original_df.loc[:,"dxdt"] = butter_lowpass_filter(original_df.loc[:,"dxdt"], cutoff=0.05, fs=1.0) #0.05
-#     original_df.loc[:,"dydt"] = butter_lowpass_filter(original_df.loc[:,"dydt"], cutoff=0.05, fs=1.0) #0.05
-#     original_df.loc[:,["ddxdt", "ddydt"]] = pd.DataFrame(np.gradient(original_df.loc[:,["dxdt", "dydt"]], original_df.loc[:,"Time"], axis=0), columns=["ddxdt", "ddydt"])
-#     original_df.loc[:,"ddxdt"] = butter_lowpass_filter(original_df.loc[:,"ddxdt"], cutoff=0.05, fs=1.0) #0.05
-#     original_df.loc[:,"ddydt"] = butter_lowpass_filter(original_df.loc[:,"ddydt"], cutoff=0.05, fs=1.0) #0.05
-#     mod_dataframe = original_df.assign(
-#         R=lambda df: (df.loc[:,"dxdt"]**2 + df.loc[:,"dydt"]**2)**1.5 / (df.loc[:,"dxdt"]*df.loc[:,"ddydt"] - df.loc[:,"dydt"]*df.loc[:,"ddxdt"])
-#     )
-#     mod_dataframe.loc[:,"ay"] = mod_dataframe.apply(lambda s: (s.at["Speed"]/3.6)**2/(9.81*s.at["R"]), axis=1)
-#     mod_dataframe.loc[:,"ay_BB"] = butter_lowpass_filter(mod_dataframe.loc[:,"ay"], cutoff=0.3, fs=1.0) #0.3
-#     mod_dataframe.loc[:,"ax"] = pd.DataFrame(np.gradient(mod_dataframe.loc[:,"Speed"]/3.6, mod_dataframe.loc[:,"Time"], axis=0)/9.81, columns=["ax"])
-#     mod_dataframe.loc[:,"ax_BB"] = butter_lowpass_filter(mod_dataframe.loc[:,"ax"], cutoff=0.07, fs=1.0) #0.07
-#     return mod_dataframe.drop(columns=["ax", "ay"]).rename(columns={"ax_BB":"Ax (g)", "ay_BB":"Ay (g)"})
 
 # Load data with Telemetry from selected laps & data formatting
 if len(list_laps_selection)>0:
@@ -659,7 +664,7 @@ def show_metrics_lap_1():
     color_back = "#0000FF"
     color_text = "#FFFFFF"
     with colT2:
-        annotated_text((select_session.results.loc[select_session.results.loc[:,"Abbreviation"]==list_laps_selection[0][0],"BroadcastName"], "", color_back, color_text))
+        annotated_text((driver_abbr_map[list_laps_selection[0][0]]["BroadcastName"], "", color_back, color_text))
         st.metric(
             "Lap number",
             int(select_lap_1.at[select_lap_1.index[0],"LapNumber"])
@@ -672,9 +677,10 @@ def show_metrics_lap_1():
             "Lap time",
             convert_time_string(select_lap_1.at[select_lap_1.index[0], "LapTime"])
         )
-        best_personal = select_laps.loc[
-            (select_laps.loc[:,"Driver"]==list_laps_selection[0][0]) & (select_laps.loc[:,"IsPersonalBest"]==True),"LapTime"
-            ].iat[-1]
+        personal_best = select_laps.loc[
+            (select_laps.loc[:,"Driver"]==list_laps_selection[0][0]) & (select_laps.loc[:,"IsPersonalBest"]==True), "LapTime"
+        ]
+        best_personal = personal_best.iat[-1] if not personal_best.empty else pd.NaT
         st.metric(
             "Personal best",
             convert_time_string(best_personal),
@@ -686,7 +692,7 @@ def show_metrics_lap_2():
     color_back = "#00FFFF"
     color_text = "#000000"
     with colT2:
-        annotated_text((select_session.results.loc[select_session.results.loc[:,"Abbreviation"]==list_laps_selection[1][0],"BroadcastName"], "", color_back, color_text))
+        annotated_text((driver_abbr_map[list_laps_selection[1][0]]["BroadcastName"], "", color_back, color_text))
         st.metric(
             "Lap number",
             int(select_lap_2.at[select_lap_2.index[0], "LapNumber"])
@@ -695,27 +701,16 @@ def show_metrics_lap_2():
             "Compound",
             select_lap_2.at[select_lap_2.index[0], "Compound"]
         )
-        def calc_lap_dif():
-            lap_dif = select_lap_2.at[select_lap_2.index[0], "LapTime"] - select_lap_1.at[select_lap_1.index[0], "LapTime"]
-            isPositive = (convert_time_float(
-                select_lap_2.at[select_lap_2.index[0], "LapTime"]
-            ) - convert_time_float(
-                select_lap_1.at[select_lap_1.index[0], "LapTime"]
-            )) >= 0
-            if isPositive:
-                return ("+"+convert_time_string(lap_dif))
-            else:
-                return ("-"+convert_time_string(dt.timedelta(days=1)-lap_dif))
-    
         st.metric(
             "Lap time",
             convert_time_string(select_lap_2.at[select_lap_2.index[0], "LapTime"]),
-            delta=calc_lap_dif(),
+            delta=signed_lap_delta(select_lap_1.at[select_lap_1.index[0], "LapTime"], select_lap_2.at[select_lap_2.index[0], "LapTime"]),
             delta_color="inverse"
         )
-        best_personal = select_laps.loc[
-            (select_laps.loc[:,"Driver"]==list_laps_selection[1][0]) & (select_laps.loc[:,"IsPersonalBest"]==True),"LapTime"
-            ].iat[-1]
+        personal_best = select_laps.loc[
+            (select_laps.loc[:,"Driver"]==list_laps_selection[1][0]) & (select_laps.loc[:,"IsPersonalBest"]==True), "LapTime"
+        ]
+        best_personal = personal_best.iat[-1] if not personal_best.empty else pd.NaT
         st.metric(
             "Personal best",
             convert_time_string(best_personal),
@@ -800,36 +795,6 @@ if len(list_laps_selection)>0:
         grid=False
     )
     colT4.altair_chart(alt_T3)
-
-# # Chart #4: g-g plot per driver
-#     alt_T4 = alt.Chart(df_telemetry_laps_inter, title="g-g diagram").mark_point(
-#     #filled=True,
-#     size=50
-#     ).encode(
-#     x=alt.X("Ay (g)"),
-#     y=alt.Y("Ax (g)"),
-#     color=alt.Color("LapN:N").scale(range=["blue", "cyan"]).legend(None),
-#     #tooltip=alt.value(None)
-#     ).properties(
-#         height=500,
-#         width=500
-#     )
-#     colT3.altair_chart(alt_T4)
-
-# # Chart #5: lateral acceleration vs speed plot per driver
-#     alt_T4 = alt.Chart(df_telemetry_laps_inter, title="Lateral acceleration per speed").mark_point(
-#     filled=True,
-#     size=50
-#     ).encode(
-#     x=alt.X("Speed"),
-#     y=alt.Y("Ay (g)"),
-#     color=alt.Color("LapN:N").scale(range=["blue", "cyan"]).legend(None),
-#     #tooltip=alt.value(None)
-#     ).properties(
-#         height=500,
-#         width=500
-#     )
-#     colT4.altair_chart(alt_T4)
 
 # Selected laps info display
 if len(list_laps_selection)>0:
