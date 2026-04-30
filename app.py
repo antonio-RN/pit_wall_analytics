@@ -6,6 +6,7 @@ import pandas as pd
 import numpy as np
 import altair as alt
 from annotated_text import annotated_text
+from scipy.interpolate import CubicSpline
 
 ff1.ergast.interface.BASE_URL = os.getenv("ERGAST_API_URL", "https://api.jolpi.ca/ergast/f1")
 
@@ -227,7 +228,6 @@ colR1, colR2 = tab_Results.columns(2)
 colR1.dataframe(
         st.session_state.results,
         hide_index=True,
-        use_container_width=True,
         key="results_display"
     )
 
@@ -292,7 +292,7 @@ colR8, colR9 = tab_Results.columns(2)
 if (st.session_state.sel_GP_session == "Race") or (st.session_state.sel_GP_session == "Sprint"):
     alt_R1_base = alt.Chart(df_laps_position, title="Race position").mark_line().encode(
         alt.X("LapNumber:Q").scale(domain=[1,n_laps]).title("Lap number"),
-        alt.Y("Position:Q").scale(domain=[20,1]).axis(tickCount=20, orient="left"),
+        alt.Y("Position:Q").scale(domain=[22,1]).axis(tickCount=22, orient="left"),
         color=alt.Color("Driver:N").scale(domain=df_color_schema.loc[:,"Abbreviation"], range=df_color_schema.loc[:,"TeamColor"]),
         tooltip= ["Driver", alt.Tooltip("LapNumber", title="Lap number"), "Position"]
     ).properties(
@@ -301,7 +301,7 @@ if (st.session_state.sel_GP_session == "Race") or (st.session_state.sel_GP_sessi
     )
     alt_R1_top = alt_R1_base.mark_point().encode(
         alt.X("LapNumber:Q").scale(domain=[1,n_laps]).title("Lap number"),
-        alt.Y("Position:Q").scale(domain=[20,1]).axis(tickCount=20, orient="right", title=""),
+        alt.Y("Position:Q").scale(domain=[22,1]).axis(tickCount=22, orient="right", title=""),
         color=alt.Color("Driver:N").scale(domain=df_color_schema.loc[:,"Abbreviation"], range=df_color_schema.loc[:,"TeamColor"]),
     )
     alt_R1 = alt.layer(alt_R1_base, alt_R1_top)
@@ -337,12 +337,12 @@ if len(driver_selection)>0:
 
 # Driver #1
     st.session_state.sel_driver_1 = driver_name_map[driver_selection[0]]["Number"]
-    select_laps_1 = select_session.laps.pick_driver(st.session_state.sel_driver_1)
+    select_laps_1 = select_session.laps.pick_drivers(st.session_state.sel_driver_1)
 
 # Driver #2 (if exists)
     if len(driver_selection)>1:
         st.session_state.sel_driver_2 = driver_name_map[driver_selection[1]]["Number"]
-        select_laps_2 = select_session.laps.pick_driver(st.session_state.sel_driver_2)
+        select_laps_2 = select_session.laps.pick_drivers(st.session_state.sel_driver_2)
 
 # Data formatting  
         select_laps_2 = select_laps_2.assign(
@@ -368,7 +368,6 @@ if len(driver_selection)>0:
     laps_display_1 = colL1.dataframe(
         st.session_state.laps_1,
         hide_index=True,
-        use_container_width=True,
         key="laps_display_1"
     )
 
@@ -413,7 +412,6 @@ if len(driver_selection)>0:
         laps_display_2 = colL11.dataframe(
             st.session_state.laps_2,
             hide_index=True,
-            use_container_width=True,
             key="laps_display_2"
         )
 
@@ -613,39 +611,50 @@ if len(list_laps_selection)>0:
 ## Data wrangling
 # Telemetry data resampling and interpolation, delta time calculation
 def inter_tel_data(s_distance, original_telem, driver, lap_n):
+    s_dist_arr = np.asarray(s_distance)
+    x_orig = original_telem["Distance"].values
+
+    def _interp_cubic(fp_values):
+        cs = CubicSpline(x_orig, fp_values, extrapolate=False)
+        out = cs(s_dist_arr)
+        mask = np.isnan(out)
+        if mask.any():
+            out[mask] = np.interp(s_dist_arr[mask], x_orig, fp_values)
+        return out
+
     df_telem = pd.DataFrame({
         "Distance": s_distance,
-        "X (m)": np.interp(x=s_distance, xp=original_telem.loc[:,"Distance"], fp=original_telem.loc[:,"X"]/10),
-        "Y (m)": np.interp(x=s_distance, xp=original_telem.loc[:,"Distance"], fp=original_telem.loc[:,"Y"]/10),
-        "Z (m)": np.interp(x=s_distance, xp=original_telem.loc[:,"Distance"], fp=original_telem.loc[:,"Z"]/10),
-        "Speed": np.interp(x=s_distance, xp=original_telem.loc[:,"Distance"], fp=original_telem.loc[:,"Speed"]),
-        "RPM": np.interp(x=s_distance, xp=original_telem.loc[:,"Distance"], fp=original_telem.loc[:,"RPM"]),
-        "nGear": np.interp(x=s_distance, xp=original_telem.loc[:,"Distance"], fp=original_telem.loc[:,"nGear"]),
-        "Throttle": np.interp(x=s_distance, xp=original_telem.loc[:,"Distance"], fp=original_telem.loc[:,"Throttle"]),
-        "Brake": np.interp(x=s_distance, xp=original_telem.loc[:,"Distance"], fp=original_telem.loc[:,"Brake"]),
-        "Time": np.interp(x=s_distance, xp=original_telem.loc[:,"Distance"], fp=original_telem.loc[:,"Time"].map(convert_time_float)),
-        "Driver": [driver for x in s_distance],
-        "LapN": [lap_n for x in s_distance]
+        "X (m)":     _interp_cubic(original_telem["X"].values / 10),
+        "Y (m)":     _interp_cubic(original_telem["Y"].values / 10),
+        "Z (m)":     _interp_cubic(original_telem["Z"].values / 10),
+        "Speed":     _interp_cubic(original_telem["Speed"].values),
+        "RPM":       _interp_cubic(original_telem["RPM"].values),
+        "nGear":     np.interp(s_dist_arr, x_orig, original_telem["nGear"]),
+        "Throttle":  _interp_cubic(original_telem["Throttle"].values),
+        "Brake":     np.interp(s_dist_arr, x_orig, original_telem["Brake"].values),
+        "Time":      _interp_cubic(original_telem["Time"].map(convert_time_float).values),
+        "Driver":    [driver for _ in s_distance],
+        "LapN":      [lap_n for _ in s_distance]
     })
     if lap_n == 1:
-        df_telem.loc[:,"Delta"] = [0 for x in s_distance]
+        df_telem["Delta"] = [0 for _ in s_distance]
     return df_telem
 
 # Load data with Telemetry from selected laps & data formatting
 if len(list_laps_selection)>0:
     select_session = load_data_session(st.session_state.sel_year, st.session_state.sel_GP, st.session_state.sel_GP_session, laps=True, telemetry=True)
-    select_laps_1 = select_session.laps.pick_driver(st.session_state.sel_telem_1)
+    select_laps_1 = select_session.laps.pick_drivers(st.session_state.sel_telem_1)
     select_lap_1 = select_laps_1.pick_laps(list_laps_selection[0][1])
     df_telemetry_laps = select_lap_1.get_telemetry()
-    s_distance = range(0,round(df_telemetry_laps.at[df_telemetry_laps.index[-1],"Distance"]),4)
+    s_distance = range(0,round(df_telemetry_laps.at[df_telemetry_laps.index[-1],"Distance"]),1)
     s_driver_1 = list_laps_selection[0][0]
     df_telemetry_laps_inter = inter_tel_data(s_distance, df_telemetry_laps, s_driver_1, 1)
     # df_telemetry_laps_inter = get_acceleration(df_telemetry_laps_inter)
     if len(list_laps_selection)>1:
-        select_laps_2 = select_session.laps.pick_driver(st.session_state.sel_telem_2)
+        select_laps_2 = select_session.laps.pick_drivers(st.session_state.sel_telem_2)
         select_lap_2 = select_laps_2.pick_laps(list_laps_selection[1][1])
         df_telemetry_laps_2 = select_lap_2.get_telemetry()
-        s_distance_2 = range(0,round(df_telemetry_laps_2.at[df_telemetry_laps_2.index[-1],"Distance"]),4)
+        s_distance_2 = range(0,round(df_telemetry_laps_2.at[df_telemetry_laps_2.index[-1],"Distance"]),1)
         s_driver_2 = list_laps_selection[1][0]
         min_distance = s_distance
         if len(s_distance_2)<len(s_distance):
@@ -762,7 +771,7 @@ if len(list_laps_selection)>0:
     ).repeat(
         row=["Speed (km/h)", "Delta (s)", "Throttle (%)", "Brake", "RPM", "Gear"]
     ).resolve_scale(x="shared").interactive()
-    colT1.altair_chart(alt_T1, use_container_width=True)
+    colT1.altair_chart(alt_T1)
 
 # Chart #2: Car speed vs car position (XYZ coordinates)
     alt_T2 = alt.Chart(df_Telemetry, title="Vehicle speed (km/h)").mark_point().encode(
