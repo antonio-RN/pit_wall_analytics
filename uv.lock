@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.14"
 
 [[package]]
@@ -659,23 +659,25 @@ name = "pit-wal-analytics"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
+    { name = "altair" },
     { name = "fastf1" },
+    { name = "numpy" },
+    { name = "pandas" },
+    { name = "scipy" },
     { name = "st-annotated-text" },
-]
-
-[package.dev-dependencies]
-dev = [
     { name = "streamlit" },
 ]
 
 [package.metadata]
 requires-dist = [
+    { name = "altair" },
     { name = "fastf1", specifier = ">=3.8.1" },
+    { name = "numpy" },
+    { name = "pandas" },
+    { name = "scipy" },
     { name = "st-annotated-text", specifier = ">=4.0.2" },
+    { name = "streamlit", specifier = ">=1.57.0" },
 ]
-
-[package.metadata.requires-dev]
-dev = [{ name = "streamlit", specifier = ">=1.57.0" }]
 
 [[package]]
 name = "platformdirs"

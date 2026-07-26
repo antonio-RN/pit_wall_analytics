@@ -26,11 +26,23 @@ def convert_time_string(timedelta_raw):
         return f"{hours:02}:{minutes:02}:{seconds:02}.{milliseconds:03}"
     return None
     
+def session_is_ready(session, require_laps=True):
+    try:
+        if require_laps and (session.laps is None or session.laps.empty):
+            return False
+        return session.results is not None and not session.results.empty
+    except ff1.exceptions.DataNotLoadedError:
+        return False
+
 @st.cache_resource(ttl=3600, show_spinner="Loading session data...")
 def load_data_session(year, event, session, laps=False, telemetry=False, weather=False):
     ff1_event = ff1.get_event(year=year, gp=event)
     ff1_session = ff1_event.get_session(session)
     ff1_session.load(laps=laps, telemetry=telemetry, weather=weather)
+    if not session_is_ready(ff1_session, require_laps=laps):
+        raise RuntimeError(
+            f"Data for {year} {event} - {session} is not available."
+        )
     return ff1_session
 
 @st.cache_resource(ttl=3600)
@@ -38,27 +50,30 @@ def get_event_schedule_cached(year):
     return ff1.get_event_schedule(year, include_testing=False)
 
 def compute_best_sectors(laps_df):
-    best_sectors_index = laps_df.loc[:, ["Sector1Time", "Sector2Time", "Sector3Time"]].apply(np.argmin, axis=0)
+    sector_columns = ["Sector1Time", "Sector2Time", "Sector3Time"]
     best_sectors = [
-        laps_df.loc[laps_df.index[best_sectors_index.iat[0]], "Sector1Time"],
-        laps_df.loc[laps_df.index[best_sectors_index.iat[1]], "Sector2Time"],
-        laps_df.loc[laps_df.index[best_sectors_index.iat[2]], "Sector3Time"]
+        sector if pd.notna(sector) else pd.NaT
+        for sector in laps_df.loc[:, sector_columns].min(skipna=True)
     ]
-    best_sectors.append(np.sum(best_sectors))
+    best_sectors.append(
+        sum(best_sectors, pd.Timedelta(0))
+        if all(pd.notna(sector) for sector in best_sectors)
+        else pd.NaT
+    )
     return best_sectors
 
 def compute_tyre_strategy(laps_df):
     stint_starts = laps_df.loc[
         (~laps_df.loc[:, "PitOutTime"].isna()) | (laps_df.loc[:, "LapNumber"] == 1), :
     ]
-    return stint_starts.loc[:, "Compound"].apply(lambda item: item[0])
+    return stint_starts.loc[:, "Compound"].dropna().apply(lambda item: item[0])
 
 def signed_lap_delta(lap_a, lap_b):
+    if pd.isna(lap_a) or pd.isna(lap_b):
+        return None
     delta = lap_b - lap_a
-    is_positive = convert_time_float(lap_b) >= convert_time_float(lap_a)
-    if is_positive:
-        return "+" + convert_time_string(delta)
-    return "-" + convert_time_string(dt.timedelta(days=1) - delta)
+    sign = "+" if delta >= pd.Timedelta(0) else "-"
+    return sign + convert_time_string(abs(delta))
 
 def convert_time_string_general(timedelta_raw):
     if pd.notna(timedelta_raw):
@@ -97,7 +112,7 @@ if dt.datetime.now(dt.timezone.utc) < select_event_schedule.loc[:,"Session5_UTC"
     )
     select_event_schedule_next = select_event_schedule.copy()
     future_events = select_event_schedule_next.loc[select_event_schedule_next.loc[:,"Session5_UTC"] > dt.datetime.now(dt.timezone.utc), :]
-    next_event = future_events.iloc[-1] if not future_events.empty else select_event_schedule_next.iloc[-1]
+    next_event = future_events.iloc[-1] if not future_events.empty else None
 
 else:
 
@@ -105,7 +120,7 @@ else:
         "Season", options=range(2018, dt.datetime.now(dt.timezone.utc).year+1)[::-1], index=0
     )
     future_events = select_event_schedule.loc[select_event_schedule.loc[:,"Session5_UTC"] > dt.datetime.now(dt.timezone.utc), :]
-    next_event = future_events.iloc[-1] if not future_events.empty else select_event_schedule.iloc[-1]
+    next_event = future_events.iloc[-1] if not future_events.empty else None
 
 select_event_schedule = get_event_schedule_cached(st.session_state.sel_year).sort_values("RoundNumber", ascending=False)
 select_event_schedule= select_event_schedule.assign(
@@ -117,21 +132,35 @@ select_event_schedule= select_event_schedule.assign(
 )
 
 # Info from next event
-time_to_next_event = next_event.at["Session5_UTC"] - dt.datetime.now(dt.timezone.utc)
+time_to_next_event = (
+    next_event.at["Session5_UTC"] - dt.datetime.now(dt.timezone.utc)
+    if next_event is not None
+    else None
+)
 rest_GPs = select_event_schedule.loc[select_event_schedule.loc[:,"Session5_UTC"] < dt.datetime.now(dt.timezone.utc),:]
 st.session_state.sel_GP = col4.selectbox(
     "Grand Prix", options=rest_GPs.sort_values("RoundNumber", ascending=False).loc[:,"EventName"], index=0
 )
-select_session_race = load_data_session(st.session_state.sel_year, st.session_state.sel_GP, "Race", laps=True)
+try:
+    select_session_race = load_data_session(st.session_state.sel_year, st.session_state.sel_GP, "Race", laps=True)
+    race_available = session_is_ready(select_session_race)
+    if race_available and len(select_session_race.results.loc[:,"Position"].unique())<5:
+        race_available = False
+except Exception:
+    select_session_race = None
+    race_available = False
 
 # Update info selected schedule (GP sessions), input from user (GP session)
 list_available_sessions = select_event_schedule.loc[
     select_event_schedule.loc[:,"EventName"] == st.session_state.sel_GP,["Session1", "Session2", "Session3", "Session4", "Session5"]
 ].iloc[0].to_list()[::-1]
 session_options = ["Qualifying", "Sprint", "Race"]
-if (len(select_session_race.results)<1) or (len(select_session_race.results.loc[:,"Position"].unique())<5) or (len(select_session_race.laps)<1):
+if not race_available:
     session_options.remove("Race")
 list_select_sessions = [session for session in list_available_sessions if session in session_options]
+if not list_select_sessions:
+    st.error(f"No session data is available for {st.session_state.sel_GP} yet. Please select another Grand Prix.")
+    st.stop()
 st.session_state.sel_GP_session = col5.selectbox(
         "Session", options=list_select_sessions, index=0
 )
@@ -153,26 +182,36 @@ colH1.write("""
 colH3, colH4 = colH2.columns(2)
 
 # Next event info
-colH3.metric(
-    "Time to next race",
-    convert_time_string_general(time_to_next_event)
-)
-colH3.metric(
-    "Grand Prix",
-    next_event.at["EventName"]
-)
-colH4.metric(
-    "Country",
-    next_event.at["Country"]
-)
-colH4.metric(
-    "Location",
-    next_event.at["Location"]
-)
+if next_event is not None:
+    colH3.metric(
+        "Time to next race",
+        convert_time_string_general(time_to_next_event)
+    )
+    colH3.metric(
+        "Grand Prix",
+        next_event.at["EventName"]
+    )
+    colH4.metric(
+        "Country",
+        next_event.at["Country"]
+    )
+    colH4.metric(
+        "Location",
+        next_event.at["Location"]
+    )
+else:
+    colH3.metric("Time to next race", "Season finished")
+    colH3.metric("Grand Prix", "No upcoming race")
+    colH4.metric("Country", "-")
+    colH4.metric("Location", "-")
 
 ## Tab RESULTS
 # Load data with Laps info
-select_session = load_data_session(st.session_state.sel_year, st.session_state.sel_GP, st.session_state.sel_GP_session, laps=True)
+try:
+    select_session = load_data_session(st.session_state.sel_year, st.session_state.sel_GP, st.session_state.sel_GP_session, laps=True)
+except Exception:
+    st.error(f"Data for {st.session_state.sel_GP} - {st.session_state.sel_GP_session} is not available yet. Please select another Grand Prix or session.")
+    st.stop()
 select_session_results = select_session.results.copy()
 
 driver_name_map = {
@@ -203,7 +242,9 @@ if (st.session_state.sel_GP_session == "Qualifying"):
     st.session_state.results = select_session_results.loc[:,results_Q_col].rename(columns=results_Q_view)
 elif (st.session_state.sel_GP_session == "Race") or (st.session_state.sel_GP_session == "Sprint"):
     select_session_results.loc[:,"Time_str"] = select_session_results.apply(
-        lambda s: convert_time_string(s.at["Time"]) if int(s.at["Position"])!=1 else None,
+        lambda s: convert_time_string(s.at["Time"])
+        if pd.notna(s.at["Position"]) and int(s.at["Position"]) != 1
+        else None,
         axis=1
     )
     results_R_col = ["Position", "Status", "DriverNumber", "BroadcastName", "TeamName", "Time_str", "Points"]
@@ -238,13 +279,14 @@ colR6.metric("Country", select_session.event.at["Country"])
 colR6.metric("Location", select_session.event.at["Location"])
 colR7.metric("Championship round", select_session.event.at["RoundNumber"])
 colR7.metric("Race date", select_session.event.at["Session5Date"].strftime("%d/%m/%Y"))
-colR7.metric("Race format", 
-            {"conventional": "Conventional",
-            "sprint_qualifying": "Sprint Qualifying",
-            "sprint_shootout": "Sprint Shootout",
-            "sprint": "Sprint"
-            }[select_session.event.at["EventFormat"]]
-)
+race_format_labels = {
+    "conventional": "Conventional",
+    "sprint_qualifying": "Sprint Qualifying",
+    "sprint_shootout": "Sprint Shootout",
+    "sprint": "Sprint"
+}
+race_format = select_session.event.at["EventFormat"]
+colR7.metric("Race format", race_format_labels.get(race_format, race_format))
 
 ## Data wrangling
 # Fuel correction estimation
@@ -290,9 +332,11 @@ colR8, colR9 = tab_Results.columns(2)
 
 # Chart #1: Position vs lap (only "Race")
 if (st.session_state.sel_GP_session == "Race") or (st.session_state.sel_GP_session == "Sprint"):
+    race_positions = df_laps_position.loc[:, "Position"].dropna()
+    max_position = int(race_positions.max()) if not race_positions.empty else len(df_color_schema)
     alt_R1_base = alt.Chart(df_laps_position, title="Race position").mark_line().encode(
         alt.X("LapNumber:Q").scale(domain=[1,n_laps]).title("Lap number"),
-        alt.Y("Position:Q").scale(domain=[22,1]).axis(tickCount=22, orient="left"),
+        alt.Y("Position:Q").scale(domain=[max_position,1]).axis(tickCount=max_position, orient="left"),
         color=alt.Color("Driver:N").scale(domain=df_color_schema.loc[:,"Abbreviation"], range=df_color_schema.loc[:,"TeamColor"]),
         tooltip= ["Driver", alt.Tooltip("LapNumber", title="Lap number"), "Position"]
     ).properties(
@@ -301,7 +345,7 @@ if (st.session_state.sel_GP_session == "Race") or (st.session_state.sel_GP_sessi
     )
     alt_R1_top = alt_R1_base.mark_point().encode(
         alt.X("LapNumber:Q").scale(domain=[1,n_laps]).title("Lap number"),
-        alt.Y("Position:Q").scale(domain=[22,1]).axis(tickCount=22, orient="right", title=""),
+        alt.Y("Position:Q").scale(domain=[max_position,1]).axis(tickCount=max_position, orient="right", title=""),
         color=alt.Color("Driver:N").scale(domain=df_color_schema.loc[:,"Abbreviation"], range=df_color_schema.loc[:,"TeamColor"]),
     )
     alt_R1 = alt.layer(alt_R1_base, alt_R1_top)
@@ -309,16 +353,19 @@ if (st.session_state.sel_GP_session == "Race") or (st.session_state.sel_GP_sessi
 
 # Chart #2: Lap time gap to P1 vs driver (only "Qualifying")
 else:
-    alt_R2 = alt.Chart(df_best_laps, title="Gap to best time (s)").mark_bar(clip=True).encode(
-        y=alt.Y("Driver:N").sort(),
-        x=alt.X("Gap:Q").scale(domain=(0,df_best_laps.iloc[-1,-1]*1.005)).axis(tickMinStep=0.1),
-        color=alt.Color("Team:N").scale(domain=df_color_schema.loc[:,"TeamName"].unique(), range=df_color_schema.loc[:,"TeamColor"].unique()),
-        tooltip=["Driver", "Gap"]
-    ).properties(
-        width=600,
-        height=600
-    )
-    colR8.altair_chart(alt_R2)
+    if df_best_laps.empty:
+        colR8.info("No valid quick laps are available for this session.")
+    else:
+        alt_R2 = alt.Chart(df_best_laps, title="Gap to best time (s)").mark_bar(clip=True).encode(
+            y=alt.Y("Driver:N").sort(),
+            x=alt.X("Gap:Q").scale(domain=(0,df_best_laps.iloc[-1,-1]*1.005)).axis(tickMinStep=0.1),
+            color=alt.Color("Team:N").scale(domain=df_color_schema.loc[:,"TeamName"].unique(), range=df_color_schema.loc[:,"TeamColor"].unique()),
+            tooltip=["Driver", "Gap"]
+        ).properties(
+            width=600,
+            height=600
+        )
+        colR8.altair_chart(alt_R2)
 
 # Chart #3: Lap time distribution vs team
 alt_R3 = alt.Chart(df_total_laps, title="Lap time distribution (s)").mark_boxplot().encode(
@@ -732,7 +779,7 @@ if len(list_laps_selection)>0:
 
 # Calculate fastest driver per minisectors (only for 2 laps selected)
     if len(list_laps_selection)>1:
-        minisectors = select_session.get_circuit_info().marshal_sectors.loc[:,"Distance"].sort_values().reset_index().drop(columns=["index"])
+        minisectors = select_session.get_circuit_info().marshal_sectors.loc[:,"Distance"].sort_values().drop_duplicates().reset_index().drop(columns=["index"])
         list_minisectors = [df_Telemetry.loc[df_Telemetry["Distance (m)"]<minisectors.loc[minisectors.index[x],"Distance"],["LapN", "Time (s)"]].groupby("LapN").max().loc[:,"Time (s)"] for x in minisectors.index]
         df_minisectors = pd.DataFrame(list_minisectors).T
         df_minisectors.columns = minisectors.index.to_list()
@@ -750,7 +797,17 @@ if len(list_laps_selection)>0:
         df_delta_minisectors.loc[:,"faster"] = df_delta_minisectors.apply(lambda s: s.iloc[0]<s.iloc[1], axis=1)
         distances = [0] + minisectors.loc[:,"Distance"].to_list() + [float(df_Telemetry.loc[:,"Distance (m)"].max())]
         distances.sort()
-        faster = pd.cut(df_telemetry_laps_inter.loc[:,"Distance"], bins=distances, labels=df_delta_minisectors.loc[:,"faster"], right=False, ordered=False)
+        valid_intervals = np.diff(np.asarray(distances)) > 0
+        interval_labels = df_delta_minisectors.loc[:,"faster"].to_numpy()[valid_intervals]
+        faster_codes = pd.cut(
+            df_telemetry_laps_inter.loc[:,"Distance"],
+            bins=distances,
+            labels=False,
+            right=False,
+            ordered=False,
+            duplicates="drop"
+        )
+        faster = faster_codes.map(dict(enumerate(interval_labels)))
         faster.name = "Faster"
         df_telemetry_laps_inter = df_telemetry_laps_inter.join(faster)
 

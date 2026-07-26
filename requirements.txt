@@ -1,2 +1,7 @@
 fastf1
 st-annotated-text
+streamlit
+altair
+pandas
+numpy
+scipy
